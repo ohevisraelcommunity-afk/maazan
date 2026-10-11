@@ -1283,24 +1283,37 @@ function getToken(email){return new Promise((ok,bad)=>{const t=email&&MAIL.token
     callback:r=>{if(r.error)return bad(r);ok({at:r.access_token,exp:Date.now()+((+r.expires_in||3600)-30)*1000})},error_callback:e=>bad(e)}); c.requestAccessToken()})}
 async function gget(tok,path){const r=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/"+path,{headers:{Authorization:"Bearer "+tok.at}}); if(!r.ok)throw {status:r.status}; return r.json()}
 function b64urlToBytes(s){s=s.replace(/-/g,"+").replace(/_/g,"/");const bin=atob(s);const a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return a}
+/* A donation receipt: the mail, file name or PDF text has to speak of a donation / section 46, not just "receipt". */
+const DON_RE=/תרומ|סעיף\s*46|46\s*א|donation/i;
+function donText(t){t=String(t||"");return DON_RE.test(t)||DON_RE.test(t.split("").reverse().join(""))}
+async function isDonation(f,meta){
+  if(donText(meta))return true;
+  if(/pdf/i.test(f.type)||/\.pdf$/i.test(f.name)){try{return donText(await pdfFirstText(f))}catch(e){return false}}
+  return false;
+}
 function walkParts(p,out){if(!p)return out;if(p.filename&&p.body&&p.body.attachmentId&&/pdf|image\//i.test(p.mimeType||""))out.push(p);(p.parts||[]).forEach(q=>walkParts(q,out));return out}
 async function checkMail(email){
   if(MAIL.busy)return; MAIL.busy=true; MAIL.msg=`<span class="spin"></span> בודק את ${esc(email)}…`; renderReceipts(true);
   let added=0;
   try{
     const tok=await getToken(email); MAIL.tokens[email]=tok;
-    const since=(S.settings.mail&&S.settings.mail.since)||((new Date().getFullYear()-2)+"/01/01");
-    const q=encodeURIComponent(`has:attachment (קבלה OR קבלות OR תרומה OR תרומות OR "סעיף 46" OR receipt OR donation) after:${since}`);
+    // only mail that arrived after the account was connected
+    S.settings.mail=S.settings.mail||{accounts:[]}; const st=S.settings.mail.start=Object.assign({},S.settings.mail.start);
+    if(!st[email]){st[email]=Math.floor(Date.now()/1000); persistSettings()}
+    const q=encodeURIComponent(`has:attachment (קבלה OR קבלות OR תרומה OR תרומות OR "סעיף 46" OR receipt OR donation) after:${st[email]}`);
     let ids=[],page=""; for(let n=0;n<4;n++){const r=await gget(tok,`messages?q=${q}&maxResults=50${page?"&pageToken="+page:""}`); ids=ids.concat((r.messages||[]).map(m=>m.id)); if(!r.nextPageToken)break; page=r.nextPageToken}
     const seen=new Set((S.settings.mail&&S.settings.mail.seen)||[]); const pendK=new Set(RPEND.filter(x=>x.mail).map(x=>x.mail.key));
     for(const id of ids){
       const m=await gget(tok,`messages/${id}?format=full`); const hd=n=>((m.payload&&m.payload.headers)||[]).find(h=>h.name.toLowerCase()===n)?.value||"";
       const from=hd("from").replace(/<.*>/,"").replace(/"/g,"").trim()||hd("from"); const when=new Date(+m.internalDate||Date.now()).toISOString().slice(0,10);
+      if((+m.internalDate||0)/1000<S.settings.mail.start[email])continue;
+      const meta=hd("subject")+" "+(m.snippet||"");
       for(const part of walkParts(m.payload,[])){
         const key=email+"|"+id+"|"+part.filename; if(seen.has(key)||pendK.has(key))continue;
-        MAIL.msg=`<span class="spin"></span> מוריד ${esc(part.filename)}…`; renderReceipts(true);
+        MAIL.msg=`<span class="spin"></span> בודק את ${esc(part.filename)}…`; renderReceipts(true);
         const a=await gget(tok,`messages/${id}/attachments/${part.body.attachmentId}`);
         const f=new File([b64urlToBytes(a.data)],part.filename,{type:part.mimeType});
+        if(!(await isDonation(f,meta+" "+part.filename)))continue;
         const fn=parseFileName(part.filename);
         RPEND.push({f,d:fn.d||when,org:fn.org||from.slice(0,60),amt:fn.amt||"",fromName:!!(fn.d||fn.amt),mail:{key,from,subj:hd("subject")}}); pendK.add(key); added++;
       }
@@ -1313,7 +1326,7 @@ function mailHtml(){
   if(!STANDALONE)return "";
   const acc=mailAccounts();
   if(!gisReady())return `<div class="f106"><b>קבלות מהמייל</b><div class="hint">כדי לחבר Gmail צריך להוסיף את GOOGLE_CLIENT_ID בראש קובץ האתר (לפי ההוראות).</div></div>`;
-  return `<div class="f106"><div class="row" style="justify-content:space-between"><div><b>קבלות מהמייל</b><div class="hint">האפליקציה מחפשת במייל הודעות עם קבלות על תרומה ומוסיפה אותן לרשימה שמחכה לאישור שלך.</div></div>
+  return `<div class="f106"><div class="row" style="justify-content:space-between"><div><b>קבלות מהמייל</b><div class="hint">רק מיילים שמגיעים מרגע החיבור, ורק קבלות שמדובר בהן על תרומה או סעיף 46. הן נכנסות לרשימה שמחכה לאישור שלך.</div></div>
       <span class="row"><button type="button" id="mlAdd">＋ חיבור חשבון Gmail</button></span></div>
     ${acc.length?`<div class="rlist">${acc.map(a=>`<div class="ritem"><div class="rthumb">✉</div><div class="nm"><b>${esc(a)}</b></div><span></span><span class="row acts" style="gap:4px"><button type="button" class="primary" data-mlcheck="${esc(a)}"${MAIL.busy?" disabled":""}>בדיקת מיילים</button><button type="button" class="ghost" data-mlrm="${esc(a)}" aria-label="ניתוק">✕</button></span></div>`).join("")}</div>`:`<div class="hint">עוד לא חוברו חשבונות.</div>`}
     ${MAIL.msg?`<div class="note">${MAIL.msg}</div>`:""}</div>`;
@@ -1321,7 +1334,9 @@ function mailHtml(){
 function wireMail(){
   if(!STANDALONE||!$("mlAdd"))return;
   $("mlAdd").onclick=async()=>{try{const tok=await getToken(null); const pr=await gget(tok,"profile"); const em=pr.emailAddress; MAIL.tokens[em]=tok;
-      S.settings.mail=S.settings.mail||{accounts:[]}; S.settings.mail.accounts=[...new Set(mailAccounts().concat(em))]; persistSettings(); checkMail(em)}
+      S.settings.mail=S.settings.mail||{accounts:[]}; S.settings.mail.accounts=[...new Set(mailAccounts().concat(em))];
+      S.settings.mail.start=Object.assign({},S.settings.mail.start); if(!S.settings.mail.start[em])S.settings.mail.start[em]=Math.floor(Date.now()/1000);
+      persistSettings(); MAIL.msg=`${esc(em)} חובר. מעכשיו קבלות תרומה שיגיעו למייל הזה יופיעו כאן לאישור.`; renderReceipts(true)}
     catch(e){console.error(e); MAIL.msg="החיבור למייל לא הושלם."; renderReceipts(true)}};
   document.querySelectorAll("[data-mlcheck]").forEach(b=>b.onclick=()=>checkMail(b.dataset.mlcheck));
   document.querySelectorAll("[data-mlrm]").forEach(b=>b.onclick=()=>{const em=b.dataset.mlrm; S.settings.mail.accounts=mailAccounts().filter(x=>x!==em); delete MAIL.tokens[em];
