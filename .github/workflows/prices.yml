@@ -28,15 +28,21 @@ jobs:
             if (!r.ok) throw new Error(url + " -> " + r.status);
             return r;
           }
+          const HIST = {};
           async function yahoo(sym) {
-            const j = await (await get("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=5d&interval=1d")).json();
+            const j = await (await get("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=1mo&interval=1d")).json();
             const res = j.chart.result[0], m = res.meta;
-            const closes = (res.indicators.quote[0].close || []).filter(v => v != null);
+            const q = res.indicators.quote[0].close || [];
+            const rows = (res.timestamp || []).map((t, i) => [new Date(t * 1000).toISOString().slice(0, 10), q[i]]).filter(r => r[1] != null);
+            HIST[sym] = rows;
+            const closes = rows.map(r => r[1]);
             const c = m.regularMarketPrice;
             let pc = closes.length >= 2 ? closes[closes.length - 2] : m.chartPreviousClose;
-            if (closes.length && Math.abs(closes[closes.length - 1] - c) > 1e-9) pc = closes[closes.length - 1];
+            if (closes.length && Math.abs(closes[closes.length - 1] / c - 1) > 1e-6) pc = closes[closes.length - 1];
             return { c, pc, t: new Date((m.regularMarketTime || Date.now() / 1000) * 1000).toISOString() };
           }
+          // the level of a series on the last trading day strictly before (or up to) a date
+          function at(sym, d, strict) { const r = (HIST[sym] || []).filter(x => strict ? x[0] < d : x[0] <= d); return r.length ? r[r.length - 1][1] : null; }
           const out = { updated: new Date().toISOString(), idx: {}, fx: null, funds: {}, log: [] };
           for (const s of ["SPY", "QQQ"]) {
             try { out.idx[s] = await yahoo(s); } catch (e) { out.log.push(String(e)); if (old.idx && old.idx[s]) out.idx[s] = old.idx[s]; }
@@ -68,8 +74,12 @@ jobs:
           for (const [id, proxy] of Object.entries(FUNDS)) {
             const f = await fundPrice(id), prev = old.funds && old.funds[id];
             if (f) {
-              if (prev && prev.p === f.p && prev.d === f.d) out.funds[id] = prev;
-              else out.funds[id] = { ...f, pc: f.pc || (prev ? prev.p : undefined), ix: Object.fromEntries(Object.entries(out.idx).map(([k, v]) => [k, v.c])), fx: out.fx ? out.fx.c : null };
+              {
+                // an Israeli fund's price for day D reflects the US close of the day before
+                const ix = Object.fromEntries(Object.entries(out.idx).map(([k, v]) => [k, at(k, f.d, true) || v.c]));
+                const fx = at("ILS=X", f.d, false) || (out.fx ? out.fx.c : null);
+                out.funds[id] = { ...f, pc: f.pc || (prev ? (prev.d < f.d ? prev.p : prev.pc) : undefined), ix, fx };
+              }
             } else if (prev) out.funds[id] = prev;
           }
           fs.writeFileSync("prices.json", JSON.stringify(out, null, 1));
