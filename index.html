@@ -929,7 +929,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 36";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 37";
 }
 function render(){
   const ys=yearsList(); const has=ys.length>0;
@@ -1871,14 +1871,15 @@ function nextMonthKey(){const ks=Object.keys(S.months).filter(k=>S.months[k].len
 function usedCats(sign){const m=new Map();for(const t of allTx()){if(isExcl(t.c))continue;if((sign==="in")===(t.a>0))m.set(t.c,(m.get(t.c)||0)+1)} let arr=[...m].sort((a,b)=>b[1]-a[1]).map(x=>x[0]); if(!arr.length)arr=CATS.filter(c=>c.t===sign&&c.n!=="שונות"&&c.n!=="הכנסה אחרת").map(c=>c.n); return arr}
 function openManual(tab){
   if(S.demo){S.demo=false;S.months={};S.settings={rules:[],imports:[],cats:[]};rebuildRules();render()}
-  const key=nextMonthKey();
+  const key=nowKey(); // manual entry always starts on the current month
   MAN={tab:tab||"month",y:+key.slice(0,4),m:+key.slice(5),v:null,lk:null,extra:{in:[],out:[]},one:{d:new Date().toISOString().slice(0,10),type:"out",amt:"",cat:"",desc:""}};
   renderManual();
 }
 function loadMonthVals(){
   const k=MAN.y+"-"+pad(MAN.m); if(MAN.lk===k)return;
-  MAN.lk=k; MAN.v={in:new Map(),out:new Map()};
-  for(const t of (S.months[k]||[]))if(t.mm){const sg=t.a>0?"in":"out";MAN.v[sg].set(t.c,r2((MAN.v[sg].get(t.c)||0)+Math.abs(t.a)))}
+  // the form always starts empty; what was already entered this month is shown beside each category and the new amounts add to it
+  MAN.lk=k; MAN.v={in:new Map(),out:new Map()}; MAN.had={in:new Map(),out:new Map()};
+  for(const t of (S.months[k]||[])){if(isExcl(t.c))continue;const sg=t.a>0?"in":"out";MAN.had[sg].set(t.c,r2((MAN.had[sg].get(t.c)||0)+Math.abs(t.a)))}
 }
 function manTotals(){let i=0,o=0;for(const v of MAN.v.in.values())i+=v||0;for(const v of MAN.v.out.values())o+=v||0;return {i,o}}
 function updateManTotals(){const t=manTotals();const el=$("manSum");if(!el)return;const pct=maaserPct();
@@ -1892,11 +1893,11 @@ function renderManual(){
     loadMonthVals();
     const k=MAN.y+"-"+pad(MAN.m); const other=(S.months[k]||[]).filter(t=>!t.mm).length;
     const sec=(sg,title)=>{const names=[...new Set([...usedCats(sg),...MAN.v[sg].keys(),...MAN.extra[sg]])];
-      return `<div class="msec"><h3><i class="dot ${sg}"></i>${title}</h3>${names.map((c,i)=>`<label class="mline"><span>${esc(c)}</span><input type="text" inputmode="decimal" id="mv-${sg}-${i}" data-sg="${sg}" data-cat="${esc(c)}" value="${MAN.v[sg].get(c)||""}" placeholder="0" class="inp num"></label>`).join("")}
+      return `<div class="msec"><h3><i class="dot ${sg}"></i>${title}</h3>${names.map((c,i)=>`<label class="mline"><span>${esc(c)}${MAN.had[sg].get(c)?` <small class="hint num">(עד עכשיו ${money(MAN.had[sg].get(c))})</small>`:""}</span><input type="text" inputmode="decimal" id="mv-${sg}-${i}" data-sg="${sg}" data-cat="${esc(c)}" value="${MAN.v[sg].get(c)||""}" placeholder="0" class="inp num"></label>`).join("")}
         <div class="madd"><input type="text" class="inp" id="newcat-${sg}" placeholder="קטגוריה נוספת"><button type="button" data-addcat="${sg}">הוספה</button></div></div>`};
     body=`<div class="row"><select id="manM" aria-label="חודש">${MONTHS.map((n,i)=>`<option value="${i+1}"${i+1===MAN.m?" selected":""}>${n}</option>`).join("")}</select><select id="manY" aria-label="שנה">${yearOptions(MAN.y)}</select>
-      ${other?`<span class="pill warn">בחודש הזה כבר יש ${other} תנועות מקבצים. הסכומים כאן יתווספו אליהן.</span>`:""}</div>
-      <div class="note">רושמים את הסה"כ של כל קטגוריה לחודש. שמירה חוזרת של אותו חודש מעדכנת את מה שהוזן ידנית.</div>
+</div>
+      <div class="note">רושמים כמה הוצאתם או קיבלתם עכשיו. הסכום מתווסף למה שכבר רשום בחודש (למשל אוכל 600 ואחר כך 400 = 1,000).</div>
       <div class="mcols">${sec("in","הכנסות")}${sec("out","הוצאות")}</div>
       <div class="msum" id="manSum"><span>הכנסות <b class="num" data-ti></b></span><span>הוצאות <b class="num" data-to></b></span><span>מאזן <b class="num" data-tn></b></span>
         <span class="row" style="gap:8px">מעשר ${maaserPct()}%: <b class="num" data-tm></b><button type="button" id="fillMaaser">הוספה כהוצאת מעשר</button></span></div>
@@ -1937,8 +1938,10 @@ function renderManual(){
 }
 function saveManualMonth(){
   const k=MAN.y+"-"+pad(MAN.m); const d=k+"-01";
-  const list=(S.months[k]||[]).filter(t=>!t.mm); let n=0;
-  for(const sg of ["in","out"])for(const [c,v] of MAN.v[sg]){if(!v)continue;ensureCat(c,sg);list.push({id:rid(),d,s:c,a:sg==="in"?r2(v):-r2(v),c,f:"manual",mm:1,u:1});n++}
+  const list=(S.months[k]||[]).slice(); let n=0;
+  const today=new Date().toISOString().slice(0,10); const dd=today.slice(0,7)===k?today:d;
+  for(const sg of ["in","out"])for(const [c,v] of MAN.v[sg]){if(!v)continue;ensureCat(c,sg);list.push({id:rid(),d:dd,s:c,a:sg==="in"?r2(v):-r2(v),c,f:"manual",mm:1,u:1});n++}
+  if(!n){toast("לא נרשם אף סכום");return}
   S.months[k]=list; normalizeFixed([k]); const y=MAN.y,m=MAN.m; MAN=null; renderManual();
   S.year=y; S.month=m-1; render(); toast(`נשמר ${MONTHS[m-1]} ${y} · ${n} קטגוריות`);
   persistMonths([k]); persistSettings();
