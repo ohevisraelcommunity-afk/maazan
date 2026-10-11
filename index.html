@@ -306,7 +306,6 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
 </head>
 <body>
 
-
 <header class="bar" dir="rtl">
   <div class="bar-in">
     <div class="brand">
@@ -331,6 +330,7 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
     <a href="#tx" class="nav" data-go="tx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg><span>תנועות</span><em class="badge-n" id="navTxN"></em></a>
     <a href="#maaser" class="nav" data-go="maaser"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z"/></svg><span>מעשרות וקבלות</span><em class="badge-s" id="navMz"></em></a>
     <a href="#debts" class="nav" data-go="debts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 4l9 6.5M5 9.5V20h14V9.5M10 20v-5h4v5"/></svg><span>משכנתא והלוואות</span></a>
+    <a href="#invest" class="nav" data-go="invest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg><span>השקעות</span></a>
     <a href="#files" class="nav" data-go="files"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg><span>קבצים וגיבוי</span></a>
     <div class="side-foot hint" id="sideFoot"></div>
   </div>
@@ -347,6 +347,7 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
     <div class="row" style="justify-content:center">
       <button class="primary" id="btnUpload2" type="button">בחירת קבצים</button>
       <button id="btnManual2" type="button">הזנה ידנית</button>
+      <button id="btnRestore2" type="button">שחזור מגיבוי</button>
       <button id="btnDemo" type="button">להציג נתוני דוגמה</button>
     </div>
   </section>
@@ -362,6 +363,7 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
       <section class="card maaser" id="maaserCard" data-page="maaser"></section>
       <section class="card" id="rcptCard" data-page="maaser"></section>
       <section class="card" id="debtsCard" data-page="debts"></section>
+      <section class="card" id="investCard" data-page="invest"></section>
 
       <section class="card" data-page="overview">
         <div class="card-head">
@@ -787,7 +789,9 @@ function persistMonths(keys){
 function persistSettings(){
   if(!persistOK||S.demo)return Promise.resolve();
   const body=JSON.parse(JSON.stringify(S.settings));
-  return enqueue(()=>db.collection(base).doc("settings").set(body));
+  // Firestore (standalone site) rejects arrays inside arrays, so the settings travel there as one JSON string
+  const doc=STANDALONE?{json:JSON.stringify(body)}:body;
+  return enqueue(()=>db.collection(base).doc("settings").set(doc));
 }
 function addTx(list){ const keys=[]; for(const t of list){const k=t.d.slice(0,7); (S.months[k]=S.months[k]||[]).push(t); keys.push(k)} return keys }
 
@@ -913,7 +917,7 @@ function sums(list){let i=0,o=0,x=0;for(const t of list){if(isExcl(t.c)){x+=Math
 function scopeTx(){if(S.year==="all")return allTx();const y=S.year; if(S.month!=null)return S.months[y+"-"+pad(S.month+1)]||[]; const a=[];for(let m=1;m<=12;m++)a.push(...(S.months[y+"-"+pad(m)]||[]));return a}
 
 /* ---------- render ---------- */
-let PAGE=(()=>{const h=(location.hash||"").slice(1);if(["overview","summary","tx","maaser","debts","files"].includes(h))return h;try{return localStorage.getItem("maazan.page")||"overview"}catch(e){return "overview"}})();
+let PAGE=(()=>{const h=(location.hash||"").slice(1);if(["overview","summary","tx","maaser","debts","invest","files"].includes(h))return h;try{return localStorage.getItem("maazan.page")||"overview"}catch(e){return "overview"}})();
 function go(p){PAGE=p;try{localStorage.setItem("maazan.page",p)}catch(e){}closeMenu();render();window.scrollTo({top:0})}
 function openMenu(){$("side").classList.add("open");$("sideScrim").hidden=false;$("btnMenu").setAttribute("aria-expanded","true")}
 function closeMenu(){$("side").classList.remove("open");$("sideScrim").hidden=true;$("btnMenu").setAttribute("aria-expanded","false")}
@@ -954,7 +958,7 @@ function render(){
    <div class="card stat"><div class="top"><span class="badge"><span class="ico out">${ICO_OUT}</span>הוצאות</span></div><div class="val num">${money(st.o)}</div><div class="sub">${st.x?`לא כולל <span class="num">${money(st.x)}</span> חיובי אשראי והעברות`:esc(scope)}</div>${spark(msY.map(m=>m.o),"var(--out)")}</div>
    ${maaserTile()}`;
   $("chartTitle").textContent=S.year==="all"?"הכנסות והוצאות לפי שנה":`הכנסות והוצאות לפי חודש · ${S.year}`;
-  renderNav(true); renderMaaser(scope); renderReceipts(); renderDebts(); renderChart(); renderMonthTable(); renderCats(); renderTx(); renderImports();
+  renderNav(true); renderMaaser(scope); renderReceipts(); renderDebts(); renderInvest(); renderChart(); renderMonthTable(); renderCats(); renderTx(); renderImports();
 }
 function spark(vals,color){const W=240,H=44,p=4,mx=Math.max(...vals,1);const n=Math.max(vals.length-1,1);if(vals.length<2)vals=[vals[0]||0,vals[0]||0];const pts=vals.map((v,i)=>[W-p-(i*(W-2*p)/n),H-p-(v/mx)*(H-2*p)]);
   const line=pts.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+","+q[1].toFixed(1)).join("");const gid="g"+color.replace(/\W/g,"");
@@ -1719,6 +1723,133 @@ function renderDebts(){
   }
 }
 
+
+/* ---------- investments ---------- */
+/* Prices come from prices.json next to the site, written once or more a day by a GitHub Action.
+   A fund's own price is used when it is newer than the last price typed in; between fund prices
+   the value moves with its index (SPY / QQQ) and the dollar rate since that anchor price. */
+let PRICES=null, INV_EDIT=null, INV_SYNC=null;
+const INV_DEFAULT=[
+  {id:"spx",name:"MTF מחקה S&P 500",num:"5122627",units:7565,cost:320.8,proxy:"SPY",hedged:false,man:{p:344.62,d:"2026-10-11"}},
+  {id:"ndx",name:"קסם NASDAQ 100 KTF",num:"5128905",units:4211,cost:369.2,proxy:"QQQ",hedged:false,man:{p:396.74,d:"2026-10-11"}}];
+function invH(){const v=S.settings.inv&&S.settings.inv.h;return JSON.parse(JSON.stringify(Array.isArray(v)?v:INV_DEFAULT))}
+function invHist(){const v=S.settings.inv&&S.settings.inv.hist;return Array.isArray(v)?v:[]}
+function invSave(h,hist){S.settings.inv={h:h,hist:hist||invHist()};persistSettings()}
+function loadPrices(){
+  if(!STANDALONE)return;
+  fetch("prices.json?t="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{if(j){PRICES=j;invAnchor();if(PAGE==="invest")renderInvest()}}).catch(()=>{});
+}
+function todayISO(){const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
+function pxNow(){return PRICES&&PRICES.idx?PRICES:null}
+/* A typed-in price gets the index and dollar levels of the moment it was saved, so later changes can move it. */
+function invAnchor(){
+  const P=pxNow(); if(!P||!S.ready)return; let ch=false; const h=invH();
+  h.forEach(x=>{if(x.man&&x.man.ix==null&&P.idx[x.proxy]&&P.fx){x.man.ix=P.idx[x.proxy].c;x.man.fx=P.fx.c;ch=true}});
+  if(ch&&persistOK&&!S.demo)invSave(h);
+}
+function invPrice(x){
+  const P=pxNow(), I=P&&P.idx[x.proxy], fx=P&&P.fx;
+  const md=x.man&&x.man.d||"";
+  const f=P&&P.funds&&P.funds[x.num];
+  // the fund's own price, if newer and believable (within 25% of what we would otherwise show)
+  let a=null;
+  if(f&&f.p&&f.d>=md){const ref=x.man?x.man.p:x.cost; if(!ref||Math.abs(f.p/ref-1)<.25)a={p:f.p,d:f.d,ix:f.ix&&f.ix[x.proxy],fx:f.fx,src:"fund"}}
+  if(!a&&x.man)a={p:x.man.p,d:x.man.d,ix:x.man.ix,fx:x.man.fx,src:"manual"};
+  if(!a)return {p:x.cost,pc:x.cost,src:"cost",d:""};
+  if(I&&a.ix&&(x.hedged||(fx&&a.fx))){
+    const k=I.c/a.ix*(x.hedged?1:fx.c/a.fx);
+    const kd=(I.pc?I.c/I.pc:1)*(x.hedged||!fx.pc?1:fx.c/fx.pc);
+    const p=a.p*k; return {p:p,pc:p/kd,src:"est",base:a,t:P.updated};
+  }
+  return {p:a.p,pc:f&&f.pc&&a.src==="fund"?f.pc:a.p,src:a.src,d:a.d};
+}
+function invRows(){return invH().map(x=>{const q=invPrice(x);const u=+x.units||0;
+  return {x,q,val:u*q.p/100,costV:u*(+x.cost||0)/100,day:u*(q.p-q.pc)/100}})}
+function invRecord(tot){
+  if(!persistOK||S.demo||!S.ready||!pxNow())return;
+  const d=todayISO(), hist=invHist().slice(); const last=hist[hist.length-1];
+  const v=Math.round(tot);
+  if(last&&last.d===d){if(Math.abs(last.v-v)<1)return; hist[hist.length-1]={d,v}} else hist.push({d,v});
+  if(hist.length>1500)hist.splice(0,hist.length-1500);
+  invSave(invH(),hist);
+}
+function pct(v){return (v>=0?"+":"−")+Math.abs(v).toFixed(2)+"%"}
+function sMoney(v){return (v>=0?"+":"−")+money(Math.abs(v))}
+function gainC(v){return v>=0?"var(--in)":"var(--danger)"}
+function invChart(hist){
+  if(hist.length<2)return `<div class="hint">הגרף יתמלא מיום ליום, כל פעם שהאתר נפתח.</div>`;
+  const W=600,H=170,pL=56,pR=8,pT=10,pB=22; const vs=hist.map(h=>h.v); let mn=Math.min(...vs),mx=Math.max(...vs); if(mx-mn<1){mx+=50;mn-=50}
+  const xs=i=>W-pR-(i*(W-pL-pR)/(hist.length-1)), ys=v=>pT+(1-(v-mn)/(mx-mn))*(H-pT-pB);
+  const pts=hist.map((h,i)=>xs(i).toFixed(1)+","+ys(h.v).toFixed(1)).join(" ");
+  const tk=[mn,(mn+mx)/2,mx].map(v=>`<text x="${pL-6}" y="${ys(v)+4}" text-anchor="end" font-size="11" fill="var(--ink2)">${fmt0.format(Math.round(v))}</text><line x1="${pL}" x2="${W-pR}" y1="${ys(v)}" y2="${ys(v)}" stroke="var(--line2)"/>`).join("");
+  const dl=(i)=>{const d=hist[i].d;return d.slice(8)+"/"+d.slice(5,7)};
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="שווי התיק לאורך זמן">${tk}
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round"/>
+    <text x="${W-pR}" y="${H-4}" text-anchor="start" font-size="11" fill="var(--ink2)">${dl(0)}</text><text x="${pL}" y="${H-4}" text-anchor="end" font-size="11" fill="var(--ink2)">${dl(hist.length-1)}</text></svg>`;
+}
+function renderInvest(){
+  const el=$("investCard"); if(!el)return;
+  invAnchor();
+  const R=invRows(); const tot=R.reduce((s,r)=>s+r.val,0), cst=R.reduce((s,r)=>s+r.costV,0), day=R.reduce((s,r)=>s+r.day,0);
+  const g=tot-cst, gp=cst?g/cst*100:0, dp=tot-day?day/(tot-day)*100:0;
+  const P=pxNow(); const upd=P&&P.updated?new Date(P.updated):null;
+  const srcTxt=q=>q.src==="fund"?"מחיר הקרן":q.src==="est"?"הערכה לפי המדד והדולר":q.src==="manual"?"מחיר שהוקלד":"לפי שער העלות";
+  const cards=R.map(({x,q,val,costV,day})=>{const gg=val-costV;
+    return `<div class="debt"><div class="row" style="justify-content:space-between"><b>${esc(x.name)}</b><span class="pill">${esc(x.num)}</span></div>
+      <div class="hint">שווי היום</div><div class="big num">${money(val)}</div>
+      <div class="kv"><span>רווח/הפסד כולל</span><b class="num" style="color:${gainC(gg)}">${sMoney(gg)} (${pct(costV?gg/costV*100:0)})</b></div>
+      <div class="kv"><span>מאז אתמול</span><b class="num" style="color:${gainC(day)}">${sMoney(day)} (${pct(q.pc?(q.p/q.pc-1)*100:0)})</b></div>
+      <div class="kv"><span>שער ${q.src==="est"?"משוער":"אחרון"}</span><b class="num">${q.p.toFixed(2)} אג׳</b></div>
+      <div class="kv"><span>שער עלות ממוצע</span><b class="num">${(+x.cost).toFixed(2)} אג׳</b></div>
+      <div class="kv"><span>כמות</span><b class="num">${fmt0.format(+x.units)}</b></div>
+      <div class="hint">${srcTxt(q)}${q.src==="est"&&q.base?` · מבוסס על שער ${q.base.p} מ-${esc(q.base.d.slice(8)+"/"+q.base.d.slice(5,7))}`:""} · עוקב אחרי ${x.proxy==="QQQ"?"נאסד\"ק 100":"S&P 500"}</div>
+      <div class="row" style="gap:4px;flex-wrap:wrap"><button type="button" class="ghost" data-isync="${x.id}">עדכון שער מהבנק</button><button type="button" class="ghost" data-iedit="${x.id}">עריכה</button><button type="button" class="ghost" data-idel="${x.id}" style="color:var(--danger)">מחיקה</button></div>
+      ${INV_SYNC===x.id?`<div class="row" style="gap:6px;flex-wrap:wrap"><input type="text" inputmode="decimal" class="inp num" id="iSyncP" placeholder="שער אחרון באגורות" style="max-width:170px"><button type="button" class="primary" id="iSyncOk">שמירה</button><button type="button" id="iSyncNo">ביטול</button></div>`:""}
+    </div>`}).join("");
+  const E=INV_EDIT;
+  const form=E?`<div class="dform">
+      <label>שם<input type="text" class="inp" id="iName" value="${esc(E.name)}"></label>
+      <label>מספר נייר<input type="text" inputmode="numeric" class="inp num" id="iNum" value="${esc(E.num)}"></label>
+      <label>כמות יחידות<input type="text" inputmode="decimal" class="inp num" id="iUnits" value="${E.units||""}"></label>
+      <label>שער עלות ממוצע (באגורות)<input type="text" inputmode="decimal" class="inp num" id="iCost" value="${E.cost||""}"></label>
+      <label>שער אחרון (באגורות)<input type="text" inputmode="decimal" class="inp num" id="iLast" value="${E.man?E.man.p:""}"></label>
+      <label>עוקב אחרי<select id="iProxy"><option value="SPY"${E.proxy==="SPY"?" selected":""}>S&amp;P 500</option><option value="QQQ"${E.proxy==="QQQ"?" selected":""}>נאסד"ק 100</option></select></label>
+      <label class="full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="iHedged"${E.hedged?" checked":""}> הקרן מנוטרלת מטבע (לא מושפעת משער הדולר)</label>
+      <div class="row full"><button type="button" class="primary" id="iSave">שמירה</button><button type="button" id="iCancel">ביטול</button><span class="hint" id="iErr"></span></div></div>`:"";
+  el.innerHTML=`<div class="card-head"><div><h2>השקעות</h2><div class="sub">${upd?`מחירים עודכנו ${upd.toLocaleDateString("he-IL")} ${upd.toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"})}`:STANDALONE?"עוד אין עדכון מחירים אוטומטי. מוצג לפי השער האחרון שהוקלד.":"באפליקציה הזו אין עדכון מחירים אוטומטי. מוצג לפי השער האחרון שהוקלד."}</div></div>${E?"":`<button type="button" id="iAdd">＋ הוספת השקעה</button>`}</div>
+    <div class="debts" style="margin-bottom:14px">
+      <div class="debt"><div class="hint">שווי התיק</div><div class="big num">${money(tot)}</div>
+        <div class="kv"><span>רווח/הפסד כולל</span><b class="num" style="color:${gainC(g)}">${sMoney(g)} (${pct(gp)})</b></div>
+        <div class="kv"><span>מאז אתמול</span><b class="num" style="color:${gainC(day)}">${sMoney(day)} (${pct(dp)})</b></div>
+        <div class="kv"><span>סכום שהושקע</span><b class="num">${money(cst)}</b></div></div>
+      <div class="debt" style="grid-column:span 2;min-width:0"><div class="hint">שווי התיק לאורך זמן</div>${invChart(invHist())}</div>
+    </div>
+    <div class="debts">${cards}</div>${form}
+    <div class="hint" style="margin-top:10px">בין עדכוני המחיר של הקרן, השווי זז לפי השינוי במדד ובשער הדולר, ולכן הוא הערכה. אחרי עדכון שער מהבנק החישוב מתיישר שוב.</div>`;
+  invRecord(tot);
+  const h=invH();
+  el.querySelectorAll("[data-isync]").forEach(b=>b.onclick=()=>{INV_SYNC=b.dataset.isync;renderInvest();setTimeout(()=>$("iSyncP")&&$("iSyncP").focus(),0)});
+  if($("iSyncNo"))$("iSyncNo").onclick=()=>{INV_SYNC=null;renderInvest()};
+  if($("iSyncOk"))$("iSyncOk").onclick=()=>{const p=num($("iSyncP").value);if(!p||p<=0){toast("רשמו את השער באגורות");return}
+    const x=h.find(y=>y.id===INV_SYNC); const P=pxNow();
+    x.man={p:Math.abs(p),d:todayISO()}; if(P&&P.idx[x.proxy]&&P.fx){x.man.ix=P.idx[x.proxy].c;x.man.fx=P.fx.c}
+    INV_SYNC=null; invSave(h); renderInvest(); toast("השער עודכן")};
+  el.querySelectorAll("[data-iedit]").forEach(b=>b.onclick=()=>{INV_EDIT=JSON.parse(JSON.stringify(h.find(x=>x.id===b.dataset.iedit)));renderInvest()});
+  el.querySelectorAll("[data-idel]").forEach(b=>b.onclick=()=>{const id=b.dataset.idel;b.parentElement.innerHTML=`<span class="hint">למחוק את ההשקעה?</span><button type="button" class="ghost" style="color:var(--danger)" id="idY">מחיקה</button><button type="button" class="ghost" id="idN">ביטול</button>`;
+    $("idN").onclick=renderInvest; $("idY").onclick=()=>{invSave(h.filter(x=>x.id!==id));renderInvest()}});
+  if($("iAdd"))$("iAdd").onclick=()=>{INV_EDIT={id:"",name:"",num:"",units:"",cost:"",proxy:"SPY",hedged:false,man:null};renderInvest()};
+  if(E){
+    $("iCancel").onclick=()=>{INV_EDIT=null;renderInvest()};
+    $("iSave").onclick=()=>{const units=num($("iUnits").value), cost=num($("iCost").value), last=num($("iLast").value);
+      const name=$("iName").value.trim(); if(!name){$("iErr").textContent="תנו שם להשקעה.";return}
+      if(!units||!cost){$("iErr").textContent="רשמו כמות ושער עלות.";return}
+      const P=pxNow(); const x={id:E.id||rid(),name:name.slice(0,60),num:$("iNum").value.replace(/\D/g,""),units:Math.abs(units),cost:Math.abs(cost),proxy:$("iProxy").value,hedged:$("iHedged").checked,man:E.man};
+      if(last&&(!E.man||Math.abs(last-E.man.p)>1e-9)){x.man={p:Math.abs(last),d:todayISO()};if(P&&P.idx[x.proxy]&&P.fx){x.man.ix=P.idx[x.proxy].c;x.man.fx=P.fx.c}}
+      else if(x.man&&E.proxy!==x.proxy){delete x.man.ix;delete x.man.fx}
+      const list=h.filter(y=>y.id!==x.id); list.push(x); INV_EDIT=null; invSave(list); renderInvest(); toast("נשמר")};
+  }
+}
+
 /* ---------- manual entry ---------- */
 let MAN=null;
 function nextMonthKey(){const ks=Object.keys(S.months).filter(k=>S.months[k].length).sort(); if(!ks.length){const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)} const [y,m]=ks[ks.length-1].split("-").map(Number); return m===12?(y+1)+"-01":y+"-"+pad(m+1)}
@@ -1842,7 +1973,7 @@ $("btnBackup").onclick=async()=>{
   const data=JSON.stringify({app:"maazan",version:2,exported:new Date().toISOString(),months:S.months,settings:S.settings,receipts:RECEIPTS,files});
   try{await downloads.save({filename:"גיבוי מאזן הבית "+new Date().toISOString().slice(0,10)+".json",data});toast("הגיבוי נשמר")}catch(e){if(e&&e.code!=="declined")toast("לא הצלחנו לשמור את הגיבוי")}
 };
-$("btnRestore").onclick=()=>$("restoreInput").click();
+$("btnRestore").onclick=$("btnRestore2").onclick=()=>$("restoreInput").click();
 $("restoreInput").onchange=async()=>{
   const f=$("restoreInput").files[0]; $("restoreInput").value=""; if(!f)return;
   try{
@@ -1879,11 +2010,12 @@ function applySnapshot(snap){
   if(S.demo&&snap.empty){S.ready=true;render();return}
   if(!snap.empty&&S.demo){S.demo=false}
   const months={}; let settings=null;
-  for(const d of snap.docs){const b=d.data(); if(d.id==="settings")settings=b; else if(d.id.startsWith("m-")&&b&&Array.isArray(b.tx))months[d.id.slice(2)]=JSON.parse(JSON.stringify(b.tx));}
+  for(const d of snap.docs){const b=d.data(); if(d.id==="settings"){try{settings=b&&typeof b.json==="string"?JSON.parse(b.json):b}catch(e){settings=b}} else if(d.id.startsWith("m-")&&b&&Array.isArray(b.tx))months[d.id.slice(2)]=JSON.parse(JSON.stringify(b.tx));}
   if(!S.demo){S.months=months; const st=settings||{}; S.settings=JSON.parse(JSON.stringify(Object.assign({},st,{rules:st.rules||[],imports:st.imports||[],cats:st.cats||[]}))); for(const [n,t] of S.settings.cats)ensureCat(n,t); for(const k in S.months)for(const t of S.months[k])if(!CAT_BY[t.c])ensureCat(t.c,t.a>0?"in":"out"); rebuildRules();}
   S.ready=true; render();
   if(!S.demo&&persistOK){const ch=normalizeFixed(); if(ch.length)persistMonths(ch)}
 }
+loadPrices(); setInterval(loadPrices,30*60*1000);
 function subscribe(){ db.collection(base).onSnapshot(applySnapshot,err=>{console.error(err);persistOK=false;S.ready=true;render()}); subscribeReceipts() }
 /* Outside Claude: plain browser download, and optional Firebase (Google sign-in + Firestore) */
 const plainDownloads={save:async({filename,data})=>{const blob=data instanceof Blob?data:new Blob([data]);const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);return {status:"saved"}}};
