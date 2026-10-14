@@ -415,6 +415,7 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
         <ul id="imports"></ul>
         <div class="wipe"><span class="hint">גיבוי שומר את כל הנתונים וההגדרות בקובץ אחד. אפשר לשחזר ממנו כאן או בגרסה אחרת של האפליקציה.</span><span class="row"><button type="button" id="btnBackup">גיבוי לקובץ</button><button type="button" id="btnRestore">שחזור מגיבוי</button></span></div>
         <div class="wipe" id="wipeBox"></div>
+        <div class="wipe" id="pwSetBox" hidden></div>
       </section>
     </div>
   </div>
@@ -428,6 +429,13 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
   <h2 style="font-size:22px">מאזן הבית</h2>
   <div class="note">התחברו עם חשבון Google כדי לראות את הנתונים שלכם מכל מכשיר.</div>
   <button class="primary" type="button" id="btnGoogle">התחברות עם Google</button>
+  <details id="pwBox" style="width:100%;text-align:right"><summary class="hint" style="cursor:pointer;text-align:center">כניסה עם מייל וסיסמה (לרכב או למכשיר שבו Google לא נפתח)</summary>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <input type="email" class="inp" id="pwEmail" placeholder="המייל שלך" dir="ltr" autocomplete="username">
+      <input type="password" class="inp" id="pwPass" placeholder="סיסמה" dir="ltr" autocomplete="current-password">
+      <button type="button" id="btnPwLogin">כניסה</button>
+      <div class="hint">את הסיסמה קובעים פעם אחת במחשב: בתפריט "קבצים וגיבוי" ← "סיסמה לכניסה מהרכב".</div>
+    </div></details>
   <div class="hint" id="loginErr"></div>
 </div></div>
 <div id="modalHost"></div>
@@ -934,7 +942,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 39";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 40";
 }
 let LOAD_SLOW=false, CLOUD_ERR=""; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
@@ -2044,19 +2052,34 @@ function applySnapshot(snap){
   if(!S.demo&&persistOK){const ch=normalizeFixed(); if(ch.length)persistMonths(ch)}
 }
 loadPrices(); setInterval(loadPrices,30*60*1000);
+function renderPwSet(u){const b=$("pwSetBox"); if(!b||!u)return; b.hidden=false;
+  const has=u.providerData.some(p=>p.providerId==="password");
+  b.innerHTML=`<span class="hint">סיסמה לכניסה מהרכב: ${has?"כבר נקבעה":"עוד לא נקבעה"}. בכניסה בסיסמה רואים את אותם נתונים, עם המייל <b dir="ltr">${esc(u.email||"")}</b>.</span>
+    <span class="row" style="gap:6px"><input type="password" class="inp" id="pwNew" placeholder="סיסמה חדשה (6 תווים לפחות)" dir="ltr" style="max-width:220px"><button type="button" id="pwSetBtn">${has?"עדכון סיסמה":"קביעת סיסמה"}</button></span>`;
+  $("pwSetBtn").onclick=async()=>{const pw=$("pwNew").value; if(pw.length<6){toast("הסיסמה צריכה 6 תווים לפחות");return}
+    try{await window.__setPw(pw); toast("הסיסמה נשמרה. ברכב: כניסה עם מייל וסיסמה"); renderPwSet(firebase.auth().currentUser)}
+    catch(e){const c=(e&&e.code)||""; toast(/requires-recent-login/.test(c)?"צאו והתחברו שוב עם Google, ואז קבעו סיסמה":/operation-not-allowed/.test(c)?"צריך קודם להפעיל כניסה בסיסמה ב-Firebase":"השמירה נכשלה: "+((e&&e.message)||c))}};
+}
 function subscribe(){ db.collection(base).onSnapshot(applySnapshot,err=>{console.error(err);CLOUD_ERR=(err&&(err.code||err.message))||"unknown";persistOK=false;S.ready=true;render()}); subscribeReceipts() }
 /* Outside Claude: plain browser download, and optional Firebase (Google sign-in + Firestore) */
 const plainDownloads={save:async({filename,data})=>{const blob=data instanceof Blob?data:new Blob([data]);const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);return {status:"saved"}}};
 function startFirebase(){
   const cfg=window.FIREBASE_CONFIG;
-  firebase.initializeApp(cfg); const auth=firebase.auth(); const fs=firebase.firestore();
+  firebase.initializeApp(cfg); const auth=firebase.auth(); const fs=firebase.firestore(); try{fs.settings({experimentalForceLongPolling:true,merge:true})}catch(e){} // long polling passes filters/proxies (e.g. NetFree) that break streaming connections
   const gate=$("loginGate"), out=$("btnSignOut");
   $("btnGoogle").onclick=async()=>{const pr=new firebase.auth.GoogleAuthProvider();$("loginErr").textContent="";
     try{await auth.signInWithPopup(pr)}catch(e){ if(e&&/popup/.test(e.code||""))return auth.signInWithRedirect(pr); $("loginErr").textContent="ההתחברות נכשלה: "+((e&&e.message)||"")}};
   out.onclick=()=>auth.signOut();
+  $("btnPwLogin").onclick=async()=>{const em=$("pwEmail").value.trim(),pw=$("pwPass").value;$("loginErr").textContent="";
+    if(!em||!pw){$("loginErr").textContent="רשמו מייל וסיסמה.";return}
+    try{await auth.signInWithEmailAndPassword(em,pw)}catch(e){const c=(e&&e.code)||"";
+      $("loginErr").textContent=/wrong-password|invalid-credential|invalid-login/.test(c)?"המייל או הסיסמה לא נכונים.":/user-not-found/.test(c)?"עדיין לא נקבעה סיסמה למייל הזה. קבעו אותה קודם במחשב.":/operation-not-allowed/.test(c)?"כניסה בסיסמה עוד לא הופעלה ב-Firebase.":"הכניסה נכשלה: "+((e&&e.message)||c)}};
+  window.__setPw=async(pw)=>{const u=auth.currentUser; if(!u)throw new Error("not signed in");
+    if(u.providerData.some(p=>p.providerId==="password"))return u.updatePassword(pw);
+    return u.linkWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,pw))};
   auth.onAuthStateChanged(u=>{
     if(!u){gate.hidden=false;out.hidden=true;persistOK=false;S.months={};S.ready=true;render();return}
-    gate.hidden=true;out.hidden=false;out.title=u.email||"";
+    gate.hidden=true;out.hidden=false;out.title=u.email||"";renderPwSet(u);
     db=fs; base="users/"+u.uid+"/data"; persistOK=true; subscribe();
   });
 }
