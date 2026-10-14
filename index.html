@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0D2A33">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script>if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
 <style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <script>
 /* ===== הדביקו כאן את ההגדרות מ-Firebase (Project settings → Your apps → Config) ===== */
@@ -929,16 +934,21 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 37";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 38";
 }
+let LOAD_SLOW=false; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
   const ys=yearsList(); const has=ys.length>0;
+  if(STANDALONE&&!S.ready&&!S.demo){ // still waiting for sign-in / the cloud: don't show the empty "upload files" screen
+    $("emptyState").hidden=true; $("main").hidden=true; const sb=$("statusBanner"); sb.hidden=false;
+    sb.innerHTML=LOAD_SLOW?`<span>האתר לא מצליח להגיע לשרתי Google (ההתחברות והנתונים). אם יש סינון כמו NetFree, צריך לבקש לפתוח: <b dir="ltr">identitytoolkit.googleapis.com, securetoken.googleapis.com, firestore.googleapis.com, apis.google.com, www.gstatic.com, maazan-73b32.firebaseapp.com</b></span>`:`<span class="spin"></span> <span>טוען את הנתונים שלך…</span>`;
+    return}
   $("emptyState").hidden=has; $("main").hidden=!has; $("btnExport").disabled=!has;
   const sb=$("statusBanner");
   if(S.demo){sb.hidden=false;sb.innerHTML=`<span>אלה נתוני דוגמה ולא נשמרים. העלו קובץ כדי להתחיל עם הנתונים שלכם.</span><button type="button" id="exitDemo">ניקוי הדוגמה</button>`;$("exitDemo").onclick=()=>{S.demo=false;S.months={};render()}}
   else if(S.ready&&!persistOK){sb.hidden=false;sb.textContent="השמירה בענן לא זמינה בתצוגה הזו. אפשר לעבוד, אבל הנתונים לא יישמרו אחרי סגירת העמוד."}
   else sb.hidden=true;
-  if(!has){renderNav(false);return}
+  if(!has){renderNav(false); if(STANDALONE&&persistOK&&S.ready&&!S.demo&&$("btnSignOut").title){sb.hidden=false;sb.innerHTML=`<span>מחובר כ-<b>${esc($("btnSignOut").title)}</b> ואין נתונים בחשבון הזה. אם הנתונים בחשבון Google אחר, לחצו "יציאה" והתחברו איתו, או שחזרו מקובץ גיבוי.</span>`} return}
   if(S.year!=="all"&&!ys.includes(S.year)){S.year=ys[0];S.month=null}
   $("years").innerHTML=ys.slice().reverse().map(y=>`<button type="button" class="chip" data-y="${y}" aria-pressed="${y===S.year}">${y}</button>`).join("")+`<button type="button" class="chip" data-y="all" aria-pressed="${S.year==="all"}">כל השנים</button>`;
   $("years").querySelectorAll("[data-y]").forEach(b=>b.onclick=()=>{S.year=b.dataset.y==="all"?"all":+b.dataset.y;S.month=null;S.shown=200;render()});
@@ -2055,6 +2065,7 @@ function startFirebase(){
   if(!c||!c.use){
     downloads=plainDownloads;
     if(window.firebase&&window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.apiKey){try{startFirebase();return}catch(e){console.error(e)}}
+    if(STANDALONE&&!window.firebase){LOAD_SLOW=true;render();return} // the Firebase scripts (www.gstatic.com) did not load
     S.ready=true;render();return}
   const [dbN,userN,sampleN,dlN]=await Promise.all([c.use("db"),c.use("user"),c.use("sample"),c.use("downloads")].map(p=>p.catch(()=>null)));
   sample=sampleN; downloads=dlN;
