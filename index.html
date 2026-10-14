@@ -942,7 +942,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 41";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 42";
 }
 let LOAD_SLOW=false, CLOUD_ERR=""; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
@@ -2103,6 +2103,33 @@ function restDB(projectId, getToken){
       return ()=>{stop=true;clearInterval(t);listeners.delete(run)} } } }
   return {collection:colRef};
 }
+/* Password sign-in without the Firebase Auth library: plain HTTPS calls, so it works in car screens and
+   simple browsers where the library or Google's popup can't run. The session is kept in localStorage. */
+const RA_KEY="maazan.rauth"; let RAUTH=null;
+function raLoad(){try{RAUTH=JSON.parse(localStorage.getItem(RA_KEY)||"null")}catch(e){RAUTH=null}return RAUTH}
+function raSave(a){RAUTH=a;try{a?localStorage.setItem(RA_KEY,JSON.stringify(a)):localStorage.removeItem(RA_KEY)}catch(e){}}
+async function raSignIn(email,pw){const key=window.FIREBASE_CONFIG.apiKey;
+  const r=await fetch("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key="+key,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:pw,returnSecureToken:true})});
+  const j=await r.json(); if(!r.ok){const e=new Error((j.error&&j.error.message)||"sign-in failed");e.code=(j.error&&j.error.message)||"";throw e}
+  raSave({uid:j.localId,email:j.email,idToken:j.idToken,refresh:j.refreshToken,exp:Date.now()+(+j.expiresIn-120)*1000}); return RAUTH}
+async function raToken(){if(!RAUTH)throw new Error("signed out"); if(Date.now()<RAUTH.exp)return RAUTH.idToken;
+  const key=window.FIREBASE_CONFIG.apiKey;
+  const r=await fetch("https://securetoken.googleapis.com/v1/token?key="+key,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"grant_type=refresh_token&refresh_token="+encodeURIComponent(RAUTH.refresh)});
+  const j=await r.json(); if(!r.ok){raSave(null);location.reload();throw new Error("session expired")}
+  raSave(Object.assign({},RAUTH,{idToken:j.id_token,refresh:j.refresh_token,exp:Date.now()+(+j.expires_in-120)*1000})); return RAUTH.idToken}
+function raStart(){ // signed in by password (no Firebase Auth library involved)
+  $("loginGate").hidden=true; const out=$("btnSignOut"); out.hidden=false; out.title=RAUTH.email||"";
+  out.onclick=()=>{raSave(null);try{firebase.auth().signOut()}catch(e){}location.reload()};
+  db=restDB(window.FIREBASE_CONFIG.projectId,raToken); base="users/"+RAUTH.uid+"/data"; persistOK=true; subscribe();
+}
+function raWireLogin(){
+  $("btnPwLogin").onclick=async()=>{const em=$("pwEmail").value.trim(),pw=$("pwPass").value;$("loginErr").textContent="";
+    if(!em||!pw){$("loginErr").textContent="רשמו מייל וסיסמה.";return}
+    $("btnPwLogin").disabled=true; $("btnPwLogin").textContent="מתחבר…";
+    try{await raSignIn(em,pw); raStart()}catch(e){const c=(e&&e.code)||"";
+      $("loginErr").textContent=/INVALID_PASSWORD|INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND/.test(c)?"המייל או הסיסמה לא נכונים, או שעוד לא נקבעה סיסמה (קובעים אותה במחשב, ב\"קבצים וגיבוי\").":/PASSWORD_LOGIN_DISABLED|OPERATION_NOT_ALLOWED/.test(c)?"כניסה בסיסמה עוד לא הופעלה ב-Firebase.":/TOO_MANY/.test(c)?"יותר מדי ניסיונות. נסו שוב בעוד כמה דקות.":"הכניסה נכשלה: "+((e&&e.message)||c)}
+    finally{$("btnPwLogin").disabled=false;$("btnPwLogin").textContent="כניסה"}};
+}
 function startFirebase(){
   const cfg=window.FIREBASE_CONFIG;
   firebase.initializeApp(cfg); const auth=firebase.auth(); const fs=restDB(cfg.projectId,()=>auth.currentUser.getIdToken());
@@ -2110,14 +2137,11 @@ function startFirebase(){
   $("btnGoogle").onclick=async()=>{const pr=new firebase.auth.GoogleAuthProvider();$("loginErr").textContent="";
     try{await auth.signInWithPopup(pr)}catch(e){ if(e&&/popup/.test(e.code||""))return auth.signInWithRedirect(pr); $("loginErr").textContent="ההתחברות נכשלה: "+((e&&e.message)||"")}};
   out.onclick=()=>auth.signOut();
-  $("btnPwLogin").onclick=async()=>{const em=$("pwEmail").value.trim(),pw=$("pwPass").value;$("loginErr").textContent="";
-    if(!em||!pw){$("loginErr").textContent="רשמו מייל וסיסמה.";return}
-    try{await auth.signInWithEmailAndPassword(em,pw)}catch(e){const c=(e&&e.code)||"";
-      $("loginErr").textContent=/wrong-password|invalid-credential|invalid-login/.test(c)?"המייל או הסיסמה לא נכונים.":/user-not-found/.test(c)?"עדיין לא נקבעה סיסמה למייל הזה. קבעו אותה קודם במחשב.":/operation-not-allowed/.test(c)?"כניסה בסיסמה עוד לא הופעלה ב-Firebase.":"הכניסה נכשלה: "+((e&&e.message)||c)}};
   window.__setPw=async(pw)=>{const u=auth.currentUser; if(!u)throw new Error("not signed in");
     if(u.providerData.some(p=>p.providerId==="password"))return u.updatePassword(pw);
     return u.linkWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,pw))};
   auth.onAuthStateChanged(u=>{
+    if(RAUTH)return; // already signed in by password
     if(!u){gate.hidden=false;out.hidden=true;persistOK=false;S.months={};S.ready=true;render();return}
     gate.hidden=true;out.hidden=false;out.title=u.email||"";renderPwSet(u);
     db=fs; base="users/"+u.uid+"/data"; persistOK=true; subscribe();
@@ -2127,8 +2151,10 @@ function startFirebase(){
   const c=window.claude;
   if(!c||!c.use){
     downloads=plainDownloads;
+    if(STANDALONE&&window.FIREBASE_CONFIG){ raWireLogin(); if(raLoad()){raStart(); if(window.firebase){try{startFirebase()}catch(e){}} return} }
     if(window.firebase&&window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.apiKey){try{startFirebase();return}catch(e){console.error(e);CLOUD_ERR="init: "+((e&&(e.code||e.message))||e)}}
-    if(STANDALONE&&!window.firebase){LOAD_SLOW=true;render();return} // the Firebase scripts (www.gstatic.com) did not load
+    if(STANDALONE&&!window.firebase){ // the Firebase library didn't load (e.g. car screen): offer password sign-in only
+      $("btnGoogle").hidden=true; const pb=$("pwBox"); if(pb)pb.open=true; $("loginGate").hidden=false; S.ready=true; render(); return}
     S.ready=true;render();return}
   const [dbN,userN,sampleN,dlN]=await Promise.all([c.use("db"),c.use("user"),c.use("sample"),c.use("downloads")].map(p=>p.catch(()=>null)));
   sample=sampleN; downloads=dlN;
