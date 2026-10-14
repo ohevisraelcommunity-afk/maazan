@@ -942,7 +942,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 40";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 41";
 }
 let LOAD_SLOW=false, CLOUD_ERR=""; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
@@ -2063,9 +2063,49 @@ function renderPwSet(u){const b=$("pwSetBox"); if(!b||!u)return; b.hidden=false;
 function subscribe(){ db.collection(base).onSnapshot(applySnapshot,err=>{console.error(err);CLOUD_ERR=(err&&(err.code||err.message))||"unknown";persistOK=false;S.ready=true;render()}); subscribeReceipts() }
 /* Outside Claude: plain browser download, and optional Firebase (Google sign-in + Firestore) */
 const plainDownloads={save:async({filename,data})=>{const blob=data instanceof Blob?data:new Blob([data]);const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);return {status:"saved"}}};
+/* Firestore over plain REST (fetch). The SDK's streaming channel hangs behind some filters (e.g. NetFree);
+   simple request/response calls get through. Implements only what this app uses. */
+function restDB(projectId, getToken){
+  const ROOT=`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/`;
+  let pending=0; const listeners=new Set();
+  const enc=v=>{ if(v===null||v===undefined)return {nullValue:null};
+    if(typeof v==="boolean")return {booleanValue:v};
+    if(typeof v==="number")return Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v};
+    if(typeof v==="string")return {stringValue:v};
+    if(Array.isArray(v))return {arrayValue:{values:v.map(enc)}};
+    const f={}; for(const k in v){if(v[k]!==undefined)f[k]=enc(v[k])} return {mapValue:{fields:f}} };
+  const dec=x=>{ if(!x||"nullValue" in x)return null; if("booleanValue" in x)return x.booleanValue; if("integerValue" in x)return Number(x.integerValue);
+    if("doubleValue" in x)return x.doubleValue; if("stringValue" in x)return x.stringValue; if("timestampValue" in x)return x.timestampValue;
+    if("arrayValue" in x)return (x.arrayValue.values||[]).map(dec); if("mapValue" in x)return decF(x.mapValue.fields); return null };
+  const decF=f=>{const o={}; for(const k in (f||{}))o[k]=dec(f[k]); return o};
+  async function call(method,path,body){
+    const tok=await getToken(); const r=await fetch(ROOT+path,{method,headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+    if(r.status===404&&method!=="PATCH")return null;
+    if(!r.ok){let m="";try{const j=await r.json();m=(j.error&&(j.error.status||j.error.message))||""}catch(e){} const e=new Error("firestore "+r.status+" "+m); e.code=(m||String(r.status)).toLowerCase().replace(/_/g,"-"); throw e}
+    return method==="DELETE"?{}:r.json();
+  }
+  const done=()=>{ if(--pending===0)setTimeout(()=>listeners.forEach(fn=>fn()),400) };
+  function docRef(path){ const id=path.split("/").pop(); return {
+    id, collection:name=>colRef(path+"/"+name),
+    async set(obj){pending++; try{await call("PATCH",path,{fields:decIn(obj)})}finally{done()}},
+    async delete(){pending++; try{await call("DELETE",path)}finally{done()}},
+    async get(){const j=await call("GET",path); return j?{exists:true,id,data:()=>decF(j.fields)}:{exists:false,id,data:()=>undefined}} } }
+  const decIn=obj=>enc(obj).mapValue.fields;
+  function colRef(path){ return {
+    doc:id=>docRef(path+"/"+id),
+    async list(){ let docs=[],tok=""; do{ const j=await call("GET",path+"?pageSize=300"+(tok?"&pageToken="+encodeURIComponent(tok):""))||{};
+        for(const d of (j.documents||[])){const id=d.name.split("/").pop(); const data=decF(d.fields); docs.push({id,data:()=>data})} tok=j.nextPageToken||"" }while(tok);
+      return {docs,empty:!docs.length} },
+    onSnapshot(cb,err){ let stop=false, busy=false;
+      const run=async()=>{ if(stop||busy||pending)return; busy=true; try{const s=await this.list(); if(!stop&&!pending)cb(s)}catch(e){if(err)err(e)} finally{busy=false} };
+      run(); listeners.add(run); const t=setInterval(()=>{if(document.visibilityState==="visible")run()},60000);
+      document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")run()});
+      return ()=>{stop=true;clearInterval(t);listeners.delete(run)} } } }
+  return {collection:colRef};
+}
 function startFirebase(){
   const cfg=window.FIREBASE_CONFIG;
-  firebase.initializeApp(cfg); const auth=firebase.auth(); const fs=firebase.firestore(); try{fs.settings({experimentalForceLongPolling:true,merge:true})}catch(e){} // long polling passes filters/proxies (e.g. NetFree) that break streaming connections
+  firebase.initializeApp(cfg); const auth=firebase.auth(); const fs=restDB(cfg.projectId,()=>auth.currentUser.getIdToken());
   const gate=$("loginGate"), out=$("btnSignOut");
   $("btnGoogle").onclick=async()=>{const pr=new firebase.auth.GoogleAuthProvider();$("loginErr").textContent="";
     try{await auth.signInWithPopup(pr)}catch(e){ if(e&&/popup/.test(e.code||""))return auth.signInWithRedirect(pr); $("loginErr").textContent="ההתחברות נכשלה: "+((e&&e.message)||"")}};
