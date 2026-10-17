@@ -558,7 +558,8 @@ const H={
   amount:["סכום חיוב","סכום החיוב","סכום בש","סכום","amount","סך"],
   type:["סוג תנועה","הכנסה/הוצאה","הוצאה/הכנסה","סוג"],
   cat:["קטגוריה","סיווג","ענף","category"],
-  note:["הערה","הערות"]
+  note:["הערה","הערות"],
+  ref:["אסמכתא","אסמכתה","reference"]
 };
 const DEBIT=["חובה","בחובה","חיוב","הוצאה","הוצאות","debit","יציאה"];
 const CREDIT=["זכות","בזכות","זיכוי","הכנסה","הכנסות","credit","כניסה"];
@@ -573,16 +574,22 @@ function detectHeader(row){
   const debit=exact(DEBIT), credit=exact(CREDIT);
   const amount=pick(H.amount);
   if(amount==null&&debit==null&&credit==null)return null;
-  const type=pick(H.type); const cat=pick(H.cat); const desc=pick(H.desc); const note=pick(H.note);
-  return {date,desc,amount,debit,credit,type,cat,note};
+  const ref=pick(H.ref); const type=pick(H.type); const cat=pick(H.cat); const desc=pick(H.desc); const note=pick(H.note);
+  return {date,desc,amount,debit,credit,type,cat,note,ref};
 }
 function rowsToCandidates(rows){
-  let map=null; const out=[];
+  let map=null; const out=[]; let lastTx=false;
   for(const row of rows){
     if(!row)continue;
-    const h=detectHeader(row); if(h){map=h;continue}
+    const h=detectHeader(row); if(h){map=h;lastTx=false;continue}
     if(!map)continue;
-    const d=parseDate(row[map.date]); if(!d)continue;
+    const d=parseDate(row[map.date]);
+    if(!d){ // a detail line right under a transaction (e.g. "העברה מאת: …") belongs to it
+      const txt=row.filter(c=>typeof c==="string"&&c.trim()&&num(c)==null).join(" ").replace(/\s+/g," ").trim();
+      const amts=row.some(c=>num(c)!=null&&String(c).trim()!=="");
+      if(lastTx&&out.length&&txt&&!amts&&/[\u0590-\u05FFA-Za-z]/.test(txt)&&!/עמוד|יתרה|סה"כ|סה״כ|הודפס|www\.|http/.test(txt)){const t=out[out.length-1]; if(t.s.length<260)t.s=(t.s+" · "+txt).slice(0,300)}
+      lastTx=false; continue}
+    lastTx=false;
     let v=null,dir=null;
     if(map.debit!=null||map.credit!=null){
       const dv=map.debit!=null?num(row[map.debit]):null, cv=map.credit!=null?num(row[map.credit]):null;
@@ -596,7 +603,7 @@ function rowsToCandidates(rows){
     if(!s&&map.cat!=null)s=String(row[map.cat]??"").trim();
     if(map.note!=null&&String(row[map.note]??"").trim())s=(s?s+" · ":"")+String(row[map.note]).trim();
     if(!s){s=row.filter((c,i)=>typeof c==="string"&&i!==map.date&&!num(c)&&!parseDate(c)).join(" ").trim()}
-    out.push({d,s:s||"ללא תיאור",v,dir,cat:map.cat!=null?String(row[map.cat]||"").trim():""});
+    out.push({d,s:s||"ללא תיאור",v,dir,cat:map.cat!=null?String(row[map.cat]||"").trim():""}); lastTx=true;
   }
   return out;
 }
@@ -945,7 +952,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 43";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 45";
 }
 let LOAD_SLOW=false, CLOUD_ERR=""; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
@@ -1901,10 +1908,16 @@ async function irFiles(files){
     IR_BUSY=`קורא את ${f.name}…`; renderIncRep();
     try{
       const r=/\.pdf$/i.test(f.name)?await parsePdf(f):await parseSpreadsheet(f);
-      const c=r.cands||[]; const hasDir=c.some(x=>x.dir!=null), hasNeg=c.some(x=>x.v<0), hasPos=c.some(x=>x.v>0);
-      if(!hasDir&&!(hasNeg&&hasPos)){toast(`ב-${f.name} לא ברור מה הכנסה (אין עמודות זכות/חובה). דלגנו עליו.`);continue}
-      for(const x of c){const a=irIncome(x,IR_FLIP[f.name]); if(!a)continue; const row={d:x.d,s:String(x.s||"").slice(0,200),a:r2(a),f:f.name};
-        const k=row.d+"|"+row.a+"|"+row.s; if(keys.has(k)){skipped++;continue} keys.add(k); rows.push(row); added++}
+      let c=r.cands||[];
+      if(!c.length&&sample&&r.text&&r.text.trim()){IR_BUSY=`קורא את ${f.name} בקריאה חכמה…`;renderIncRep(); try{c=await aiExtract(f.name,r.text)}catch(e){console.error(e)}}
+      if(!c.length){toast(r.text&&r.text.trim().length>50?`ב-${f.name} לא נמצאה טבלת תנועות שאפשר לקרוא.`:`ב-${f.name} אין טקסט לקריאה (כנראה צילום או סריקה). נסו להוריד מהבנק קובץ Excel או PDF רגיל.`);continue}
+      const hasDir=c.some(x=>x.dir!=null), hasNeg=c.some(x=>x.v<0), hasPos=c.some(x=>x.v>0);
+      // no debit/credit split and only one sign: a statement filtered to credits ("בזכות") is all income
+      const allInc=!hasDir&&!(hasNeg&&hasPos)&&(/זכות|זיכוי|הכנסות/.test(r.text||"")||hasPos);
+      let fileAdded=0;
+      for(const x of c){const a=allInc?Math.abs(x.v):irIncome(x,IR_FLIP[f.name]); if(!a)continue; const row={d:x.d,s:String(x.s||"").slice(0,200),a:r2(a),f:f.name};
+        const k=row.d+"|"+row.a+"|"+row.s; if(keys.has(k)){skipped++;continue} keys.add(k); rows.push(row); added++; fileAdded++}
+      if(!fileAdded)toast(`ב-${f.name} נמצאו ${c.length} תנועות, אבל אף אחת מהן לא זוהתה כהכנסה.`);
     }catch(e){console.error(e);toast("לא הצלחנו לקרוא את "+f.name)}
   }
   IR_BUSY=""; rows.sort((a,b)=>a.d.localeCompare(b.d)); irSave(rows);
@@ -2096,7 +2109,7 @@ const dz=$("emptyState");
 dz.addEventListener("click",e=>{if(e.target===dz||e.target.classList.contains("big"))fi.click()});
 ["dragenter","dragover"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("over")}));
 ["dragleave","drop"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();if(ev==="drop"||!e.relatedTarget)dz.classList.remove("over")}));
-document.addEventListener("drop",e=>{if(e.dataTransfer&&e.dataTransfer.files.length)handleFiles(e.dataTransfer.files)});
+document.addEventListener("drop",e=>{if(e.dataTransfer&&e.dataTransfer.files.length){ if(PAGE==="increp")irFiles(e.dataTransfer.files); else handleFiles(e.dataTransfer.files)}}); // files dropped on the income report stay in the report only
 let rT=null; window.addEventListener("resize",()=>{clearTimeout(rT);rT=setTimeout(()=>{if(!$("main").hidden)renderChart()},150)});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&MAN){MAN=null;renderManual();return}});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&pending.length&&!pending.some(p=>p.aiBusy)){pending=[];renderModal()}});
