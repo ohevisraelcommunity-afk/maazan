@@ -308,10 +308,11 @@ button.danger-solid{background:var(--danger);color:#fff;border-color:var(--dange
   .txtable td:nth-child(5){grid-area:del}
 }
 .irsub td{font-weight:600;background:var(--surface-2);color:var(--ink2)}
+.linkish{background:none;border:none;padding:0;color:var(--accent,inherit);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font:inherit;text-align:start}
+#incRepCard td{vertical-align:top}
 </style>
 </head>
 <body>
-
 <header class="bar" dir="rtl">
   <div class="bar-in">
     <div class="brand">
@@ -960,7 +961,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 46";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 47";
 }
 let LOAD_SLOW=false, CLOUD_ERR=""; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
@@ -1932,36 +1933,66 @@ async function irFiles(files){
   const ys=[...new Set(rows.map(r=>+r.d.slice(0,4)))]; if(ys.length&&!ys.includes(IR_Y))IR_Y=Math.max(...ys);
   renderIncRep(); toast(`נוספו ${added} הכנסות`+(skipped?` · ${skipped} כפולות דולגו`:""));
 }
+function irSplit(s){ // split a statement description into its parts: action, payer, account, purpose
+  const parts=String(s||"").split(" · ").map(x=>x.trim()).filter(Boolean);
+  const act=parts[0]||""; let rest=parts.slice(1).join(" ").trim(); let from="",acct="",note="";
+  const m=rest.match(/^(.*?)(?:העברה\s*)?(?:מאת|מאת\s*:|מחשבון)\s*:?\s*(.+)$/);
+  if(m){ const pre=m[1].trim(); let t=m[2].trim();
+    const am=t.match(/\d{1,3}-\d{2,4}-\d{3,}/);
+    if(am){from=t.slice(0,am.index).trim(); acct=am[0]; note=t.slice(am.index+am[0].length).trim()} else from=t;
+    if(pre)note=(pre+" "+note).trim();
+  } else { const am=rest.match(/\d{1,3}-\d{2,4}-\d{3,}/); if(am){acct=am[0]; rest=(rest.slice(0,am.index)+" "+rest.slice(am.index+am[0].length)).trim()} note=rest }
+  from=from.replace(/[\s:·,-]+$/,"").trim(); note=note.replace(/^[\s:·,-]+|[\s:·,-]+$/g,"").trim();
+  return {act,from,acct,note,src:(from||act||"ללא פירוט").replace(/\s+/g," ")};
+}
 async function irExport(){
   const L=irRows().filter(r=>+r.d.slice(0,4)===IR_Y); if(!L.length){toast("אין הכנסות בשנה הזו");return}
-  const aoa=[["תאריך","חודש","תיאור","סכום","קובץ"]].concat(L.map(r=>[r.d.split("-").reverse().join("/"),MONTHS[+r.d.slice(5,7)-1],r.s,r.a,r.f||""]));
-  aoa.push([]); aoa.push(["",'סה"כ '+IR_Y,"",r2(L.reduce((s,r)=>s+r.a,0)),""]);
-  const wb=XLSX.utils.book_new(); wb.Workbook={Views:[{RTL:true}]}; const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:11},{wch:9},{wch:40},{wch:12},{wch:28}];
+  const aoa=[["תאריך","חודש","סוג הפעולה","ממי","מספר חשבון","פירוט","סכום","קובץ"]].concat(L.map(r=>{const p=irSplit(r.s);return [r.d.split("-").reverse().join("/"),MONTHS[+r.d.slice(5,7)-1],p.act,p.from,p.acct,p.note,r.a,r.f||""]}));
+  aoa.push([]); aoa.push(["",'סה"כ '+IR_Y,"","","","",r2(L.reduce((s,r)=>s+r.a,0)),""]);
+  const wb=XLSX.utils.book_new(); wb.Workbook={Views:[{RTL:true}]}; const ws=XLSX.utils.aoa_to_sheet(aoa); ws["!cols"]=[{wch:11},{wch:9},{wch:22},{wch:24},{wch:18},{wch:24},{wch:12},{wch:28}];
   const ms=[["חודש","סה\"כ הכנסות","מספר הכנסות"]]; for(let m=1;m<=12;m++){const x=L.filter(r=>+r.d.slice(5,7)===m); if(x.length)ms.push([MONTHS[m-1],r2(x.reduce((s,r)=>s+r.a,0)),x.length])}
-  XLSX.utils.book_append_sheet(wb,ws,"הכנסות "+IR_Y); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ms),"לפי חודש");
+  const ss=[["מקור ההכנסה","כמה פעמים","סה\"כ שנכנס","ממוצע לפעם","פעם ראשונה","פעם אחרונה"]].concat(irSources(L).map(g=>[g.src,g.n,r2(g.sum),r2(g.sum/g.n),g.first.split("-").reverse().join("/"),g.last.split("-").reverse().join("/")]));
+  const ws3=XLSX.utils.aoa_to_sheet(ss); ws3["!cols"]=[{wch:28},{wch:10},{wch:13},{wch:12},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws,"הכנסות "+IR_Y); XLSX.utils.book_append_sheet(wb,ws3,"לפי מקור"); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ms),"לפי חודש");
   const out=XLSX.write(wb,{type:"array",bookType:"xlsx"}); if(!downloads){toast("ההורדה לא זמינה בתצוגה הזו");return}
   try{await downloads.save({filename:"הכנסות "+IR_Y+".xlsx",data:new Blob([out])});toast("הקובץ נשמר")}catch(e){if(e&&e.code!=="declined")toast("לא הצלחנו לשמור את הקובץ")}
 }
+function irSources(L){ const m=new Map();
+  for(const r of L){const k=irSplit(r.s).src; const g=m.get(k)||{src:k,n:0,sum:0,first:r.d,last:r.d}; g.n++; g.sum+=r.a; if(r.d<g.first)g.first=r.d; if(r.d>g.last)g.last=r.d; m.set(k,g)}
+  return [...m.values()].sort((a,b)=>b.sum-a.sum);
+}
+let IR_VIEW="date", IR_SRC="";
 function renderIncRep(){
   const el=$("incRepCard"); if(!el)return;
   const all=irRows(); const years=[...new Set(all.map(r=>+r.d.slice(0,4)))].sort((a,b)=>b-a); if(!years.includes(IR_Y))years.unshift(IR_Y);
-  const L=all.filter(r=>+r.d.slice(0,4)===IR_Y); const tot=L.reduce((s,r)=>s+r.a,0);
+  const YL=all.filter(r=>+r.d.slice(0,4)===IR_Y); const tot=YL.reduce((s,r)=>s+r.a,0);
+  const srcs=irSources(YL); if(IR_SRC&&!srcs.some(g=>g.src===IR_SRC))IR_SRC="";
+  const L=IR_SRC?YL.filter(r=>irSplit(r.s).src===IR_SRC):YL;
+  const sub=(m)=>{const x=L.filter(t=>+t.d.slice(5,7)===m);return `<tr class="irsub"><td colspan="5">סה"כ ${MONTHS[m-1]} · ${x.length===1?"הכנסה אחת":x.length+" הכנסות"}</td><td class="n num">${money2(x.reduce((s,t)=>s+t.a,0))}</td><td></td></tr>`};
   let body="", cm=0;
-  for(const r of L){const m=+r.d.slice(5,7); if(m!==cm){ if(cm){const x=L.filter(t=>+t.d.slice(5,7)===cm);body+=`<tr class="irsub"><td colspan="2">סה"כ ${MONTHS[cm-1]}</td><td class="n num">${money2(x.reduce((s,t)=>s+t.a,0))}</td><td></td></tr>`} cm=m}
-    body+=`<tr><td class="num">${r.d.split("-").reverse().join("/")}</td><td>${esc(r.s)}</td><td class="n num amt-in">${money2(r.a)}</td><td><button type="button" class="ghost" data-irdel="${esc(r.d+"|"+r.a+"|"+r.s)}" aria-label="מחיקה" style="padding:2px 8px">✕</button></td></tr>`}
-  if(cm){const x=L.filter(t=>+t.d.slice(5,7)===cm);body+=`<tr class="irsub"><td colspan="2">סה"כ ${MONTHS[cm-1]}</td><td class="n num">${money2(x.reduce((s,t)=>s+t.a,0))}</td><td></td></tr>`}
+  for(const r of L){const m=+r.d.slice(5,7); if(m!==cm){ if(cm)body+=sub(cm); cm=m}
+    const p=irSplit(r.s);
+    body+=`<tr><td class="num">${r.d.split("-").reverse().join("/")}</td><td>${esc(p.act)}</td><td>${p.from?`<button type="button" class="linkish" data-irsrc="${esc(p.src)}">${esc(p.from)}</button>`:"—"}</td><td class="num" dir="ltr" style="white-space:nowrap">${esc(p.acct)||"—"}</td><td>${esc(p.note)||"—"}</td><td class="n num amt-in">${money2(r.a)}</td><td><button type="button" class="ghost" data-irdel="${esc(r.d+"|"+r.a+"|"+r.s)}" aria-label="מחיקה" style="padding:2px 8px">✕</button></td></tr>`}
+  if(cm)body+=sub(cm);
+  const srcTable=`<div class="prev" style="max-height:none"><table><thead><tr><th>מקור ההכנסה</th><th class="n">כמה פעמים</th><th class="n">סה"כ שנכנס</th><th class="n">ממוצע לפעם</th><th>ראשונה</th><th>אחרונה</th></tr></thead><tbody>${srcs.map(g=>`<tr><td><button type="button" class="linkish" data-irsrc="${esc(g.src)}">${esc(g.src)}</button></td><td class="n num">${g.n}</td><td class="n num amt-in">${money2(g.sum)}</td><td class="n num">${money2(g.sum/g.n)}</td><td class="num">${g.first.split("-").reverse().join("/")}</td><td class="num">${g.last.split("-").reverse().join("/")}</td></tr>`).join("")}<tr class="irsub"><td>סה"כ ${srcs.length} מקורות</td><td class="n num">${YL.length}</td><td class="n num">${money2(tot)}</td><td colspan="3"></td></tr></tbody></table></div>`;
+  const dateTable=`${IR_SRC?`<div class="row" style="gap:8px;margin-bottom:8px"><span class="pill ok">מציג רק: <b>${esc(IR_SRC)}</b> · ${L.length} פעמים · <b class="num">${money2(L.reduce((s,r)=>s+r.a,0))}</b></span><button type="button" class="ghost" id="irSrcX">הצגת הכול</button></div>`:""}
+    <div class="prev" style="max-height:none"><table><thead><tr><th>תאריך</th><th>סוג הפעולה</th><th>ממי</th><th>מספר חשבון</th><th>פירוט</th><th class="n">סכום</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
   el.innerHTML=`<div class="card-head"><div><h2>דוח הכנסות שנתי</h2><div class="sub">מעלים דפי בנק, ונשארות רק ההכנסות של השנה, כל אחת עם התאריך והפירוט. הדוח נפרד מהמאזן ולא משנה אותו.</div></div>
-      <span class="row" style="gap:6px"><button type="button" class="primary" id="irUp"${IR_BUSY?" disabled":""}>＋ העלאת דפי בנק</button><button type="button" id="irXls"${L.length?"":" disabled"}>ייצוא לאקסל</button></span></div>
+      <span class="row" style="gap:6px"><button type="button" class="primary" id="irUp"${IR_BUSY?" disabled":""}>＋ העלאת דפי בנק</button><button type="button" id="irXls"${YL.length?"":" disabled"}>ייצוא לאקסל</button></span></div>
     <input type="file" id="irInput" multiple accept=".xlsx,.xls,.csv,.pdf,.txt" hidden>
     ${IR_BUSY?`<div class="note"><span class="spin"></span> ${esc(IR_BUSY)}</div>`:""}
-    <div class="row" style="gap:10px;margin-bottom:12px"><label class="row" style="gap:6px"><span class="note">שנה:</span><select id="irYear">${years.map(y=>`<option value="${y}"${y===IR_Y?" selected":""}>${y}</option>`).join("")}</select></label>
-      <span class="pill ok">סה"כ הכנסות ${IR_Y}: <b class="num">${money2(tot)}</b> · ${L.length} הכנסות</span></div>
-    ${L.length?`<div class="prev" style="max-height:none"><table><thead><tr><th>תאריך</th><th>פירוט</th><th class="n">סכום</th><th></th></tr></thead><tbody>${body}</tbody></table></div>
+    <div class="row" style="gap:10px;margin-bottom:12px;flex-wrap:wrap"><label class="row" style="gap:6px"><span class="note">שנה:</span><select id="irYear">${years.map(y=>`<option value="${y}"${y===IR_Y?" selected":""}>${y}</option>`).join("")}</select></label>
+      <span class="pill ok">סה"כ הכנסות ${IR_Y}: <b class="num">${money2(tot)}</b> · ${YL.length} הכנסות · ${srcs.length} מקורות</span>
+      ${YL.length?`<span class="row irtabs" style="gap:4px"><button type="button" data-irview="date" class="${IR_VIEW==="date"?"primary":""}">כל ההכנסות</button><button type="button" data-irview="src" class="${IR_VIEW==="src"?"primary":""}">לפי מקור הכנסה</button></span>`:""}</div>
+    ${YL.length?`${IR_VIEW==="src"?srcTable:dateTable}
       <div class="row" style="margin-top:10px"><button type="button" class="ghost" id="irClear" style="color:var(--danger)">מחיקת כל ההכנסות של ${IR_Y} מהדוח</button></div>`
       :`<div class="note">עוד אין הכנסות לשנת ${IR_Y}. לחצו "העלאת דפי בנק" ובחרו קובץ אחד או כמה. אפשר להעלות דפים מכמה חודשים, וכפילויות ידולגו לבד.</div>`}`;
   $("irUp").onclick=()=>$("irInput").click(); $("irInput").onchange=()=>{const f=$("irInput").files; if(f&&f.length)irFiles(f); $("irInput").value=""};
-  $("irYear").onchange=()=>{IR_Y=+$("irYear").value;renderIncRep()};
+  $("irYear").onchange=()=>{IR_Y=+$("irYear").value;IR_SRC="";renderIncRep()};
   if($("irXls"))$("irXls").onclick=irExport;
+  el.querySelectorAll("[data-irview]").forEach(b=>b.onclick=()=>{IR_VIEW=b.dataset.irview;if(IR_VIEW==="src")IR_SRC="";renderIncRep()});
+  el.querySelectorAll("[data-irsrc]").forEach(b=>b.onclick=()=>{IR_SRC=b.dataset.irsrc;IR_VIEW="date";renderIncRep()});
+  if($("irSrcX"))$("irSrcX").onclick=()=>{IR_SRC="";renderIncRep()};
   el.querySelectorAll("[data-irdel]").forEach(b=>b.onclick=()=>{const k=b.dataset.irdel; irSave(irRows().filter(r=>r.d+"|"+r.a+"|"+r.s!==k)); renderIncRep()});
   if($("irClear"))$("irClear").onclick=()=>{const b=$("irClear"); if(b.dataset.ok){irSave(irRows().filter(r=>+r.d.slice(0,4)!==IR_Y));renderIncRep()} else {b.dataset.ok=1;b.textContent="ללחוץ שוב לאישור המחיקה"}};
 }
@@ -2248,5 +2279,4 @@ function startFirebase(){
 })();
 </script>
 
-</body>
-</html>
+</body></html>
