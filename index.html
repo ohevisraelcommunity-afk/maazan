@@ -961,7 +961,7 @@ function renderNav(has){
   $("navTxN").textContent=scopeTx().length||"";
   try{const L=maaserLedger();const v=S.year==="all"?L.left:maaserYear(L,S.year).end;const b=$("navMz");
     if(v>0.5){b.textContent="חסר";b.className="badge-s owe"}else{b.textContent="✓";b.className="badge-s ok"}}catch(e){}
-  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 47";
+  $("sideFoot").textContent=S.year==="all"?"מוצג: כל השנים":"מוצג: "+(S.month!=null?MONTHS[S.month]+" ":"")+S.year+" · גרסה 48";
 }
 let LOAD_SLOW=false, CLOUD_ERR=""; setTimeout(()=>{LOAD_SLOW=true;if(!S.ready)render()},15000);
 function render(){
@@ -1782,8 +1782,8 @@ function renderDebts(){
    the value moves with its index (SPY / QQQ) and the dollar rate since that anchor price. */
 let PRICES=null, INV_EDIT=null, INV_SYNC=null;
 const INV_DEFAULT=[
-  {id:"spx",name:"MTF מחקה S&P 500",num:"5122627",units:7565,cost:320.8,proxy:"SPY",hedged:false,man:{p:344.62,d:"2026-10-11"}},
-  {id:"ndx",name:"קסם NASDAQ 100 KTF",num:"5128905",units:4211,cost:369.2,proxy:"QQQ",hedged:false,man:{p:396.74,d:"2026-10-11"}}];
+  {id:"spx",name:"MTF מחקה S&P 500",num:"5122627",units:7565,cost:320.8,proxy:"SPY",hedged:false,bfx:2.88,man:{p:344.62,d:"2026-10-11"}},
+  {id:"ndx",name:"קסם NASDAQ 100 KTF",num:"5128905",units:4211,cost:369.2,proxy:"QQQ",hedged:false,bfx:2.88,man:{p:396.74,d:"2026-10-11"}}];
 function invH(){const v=S.settings.inv&&S.settings.inv.h;return JSON.parse(JSON.stringify(Array.isArray(v)?v:INV_DEFAULT))}
 function invHist(){const v=S.settings.inv&&S.settings.inv.hist;return Array.isArray(v)?v:[]}
 function invSave(h,hist){S.settings.inv={h:h,hist:hist||invHist()};persistSettings()}
@@ -1815,8 +1815,15 @@ function invPrice(x){
   }
   return {p:a.p,pc:f&&f.pc&&a.src==="fund"?f.pc:a.p,src:a.src,d:a.d};
 }
-function invRows(){return invH().map(x=>{const q=invPrice(x);const u=+x.units||0;
-  return {x,q,val:u*q.p/100,costV:u*(+x.cost||0)/100,day:u*(q.p-q.pc)/100}})}
+const INV_BFX=2.88; // the dollar rate when most of the units were bought
+function invBfx(x){return x.hedged?null:(+x.bfx>0?+x.bfx:INV_BFX)}
+function invRows(){const P=pxNow(), fx=P&&P.fx;
+  return invH().map(x=>{const q=invPrice(x);const u=+x.units||0;
+  const val=u*q.p/100, costV=u*(+x.cost||0)/100, day=u*(q.p-q.pc)/100, bfx=invBfx(x);
+  // split the gain into what came from the dollar and what came from the index itself
+  let fxG=null, fxD=null;
+  if(bfx&&fx&&fx.c){fxG=val-val/(fx.c/bfx); if(fx.pc)fxD=val-val/(fx.c/fx.pc)}
+  return {x,q,val,costV,day,bfx,fxG,fxD}})}
 function invRecord(tot){
   if(!persistOK||S.demo||!S.ready||!pxNow())return;
   const d=todayISO(), hist=invHist().slice(); const last=hist[hist.length-1];
@@ -1844,13 +1851,24 @@ function renderInvest(){
   invAnchor();
   const R=invRows(); const tot=R.reduce((s,r)=>s+r.val,0), cst=R.reduce((s,r)=>s+r.costV,0), day=R.reduce((s,r)=>s+r.day,0);
   const g=tot-cst, gp=cst?g/cst*100:0, dp=tot-day?day/(tot-day)*100:0;
-  const P=pxNow(); const upd=P&&P.updated?new Date(P.updated):null;
+  const P=pxNow(); const upd=P&&P.updated?new Date(P.updated):null; const FX=P&&P.fx&&P.fx.c?P.fx:null;
+  const hasFx=R.some(r=>r.fxG!=null), fxG=R.reduce((s,r)=>s+(r.fxG||0),0), fxD=R.reduce((s,r)=>s+(r.fxD||0),0);
+  const bR=R.filter(r=>r.bfx), bAvg=bR.length?bR.reduce((s,r)=>s+r.bfx*r.costV,0)/(bR.reduce((s,r)=>s+r.costV,0)||1):INV_BFX;
+  const split=(gain,fxPart)=>fxPart==null?"":`<div class="kv" style="font-size:13px"><span class="hint">· מהמדד</span><b class="num" style="color:${gainC(gain-fxPart)}">${sMoney(gain-fxPart)}</b></div><div class="kv" style="font-size:13px"><span class="hint">· מהדולר</span><b class="num" style="color:${gainC(fxPart)}">${sMoney(fxPart)}</b></div>`;
+  const fxCard=FX?`<div class="debt"><div class="hint">שער הדולר</div><div class="big num">₪${FX.c.toFixed(3)}</div>
+        <div class="kv"><span>מאז אתמול</span><b class="num" style="color:${gainC(FX.pc?FX.c-FX.pc:0)}">${FX.pc?pct((FX.c/FX.pc-1)*100):"—"}</b></div>
+        <div class="kv"><span>בזמן הקנייה</span><b class="num">₪${bAvg.toFixed(2)}</b></div>
+        <div class="kv"><span>שינוי מאז הקנייה</span><b class="num" style="color:${gainC(FX.c-bAvg)}">${pct((FX.c/bAvg-1)*100)}</b></div>
+        <div class="hint">כשהדולר עולה, הקרנות שלך שוות יותר בשקלים, וכשהוא יורד הן שוות פחות.</div></div>`:"";
   const srcTxt=q=>q.src==="fund"?"מחיר הקרן":q.src==="est"?"הערכה לפי המדד והדולר":q.src==="manual"?"מחיר שהוקלד":"לפי שער העלות";
-  const cards=R.map(({x,q,val,costV,day})=>{const gg=val-costV;
+  const cards=R.map(({x,q,val,costV,day,bfx,fxG,fxD})=>{const gg=val-costV;
     return `<div class="debt"><div class="row" style="justify-content:space-between"><b>${esc(x.name)}</b><span class="pill">${esc(x.num)}</span></div>
       <div class="hint">שווי היום</div><div class="big num">${money(val)}</div>
       <div class="kv"><span>רווח/הפסד כולל</span><b class="num" style="color:${gainC(gg)}">${sMoney(gg)} (${pct(costV?gg/costV*100:0)})</b></div>
+      ${split(gg,fxG)}
       <div class="kv"><span>מאז אתמול</span><b class="num" style="color:${gainC(day)}">${sMoney(day)} (${pct(q.pc?(q.p/q.pc-1)*100:0)})</b></div>
+      ${split(day,fxD)}
+      <div class="kv"><span>שער דולר בקנייה</span><b class="num">${bfx?"₪"+bfx.toFixed(2):"מנוטרלת מטבע"}</b></div>
       <div class="kv"><span>שער ${q.src==="est"?"משוער":"אחרון"}</span><b class="num">${q.p.toFixed(2)} אג׳</b></div>
       <div class="kv"><span>שער עלות ממוצע</span><b class="num">${(+x.cost).toFixed(2)} אג׳</b></div>
       <div class="kv"><span>כמות</span><b class="num">${fmt0.format(+x.units)}</b></div>
@@ -1865,6 +1883,7 @@ function renderInvest(){
       <label>כמות יחידות<input type="text" inputmode="decimal" class="inp num" id="iUnits" value="${E.units||""}"></label>
       <label>שער עלות ממוצע (באגורות)<input type="text" inputmode="decimal" class="inp num" id="iCost" value="${E.cost||""}"></label>
       <label>שער אחרון (באגורות)<input type="text" inputmode="decimal" class="inp num" id="iLast" value="${E.man?E.man.p:""}"></label>
+      <label>שער הדולר בזמן הקנייה<input type="text" inputmode="decimal" class="inp num" id="iBfx" value="${E.bfx||INV_BFX}"></label>
       <label>עוקב אחרי<select id="iProxy"><option value="SPY"${E.proxy==="SPY"?" selected":""}>S&amp;P 500</option><option value="QQQ"${E.proxy==="QQQ"?" selected":""}>נאסד"ק 100</option></select></label>
       <label class="full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="iHedged"${E.hedged?" checked":""}> הקרן מנוטרלת מטבע (לא מושפעת משער הדולר)</label>
       <div class="row full"><button type="button" class="primary" id="iSave">שמירה</button><button type="button" id="iCancel">ביטול</button><span class="hint" id="iErr"></span></div></div>`:"";
@@ -1872,8 +1891,11 @@ function renderInvest(){
     <div class="debts" style="margin-bottom:14px">
       <div class="debt"><div class="hint">שווי התיק</div><div class="big num">${money(tot)}</div>
         <div class="kv"><span>רווח/הפסד כולל</span><b class="num" style="color:${gainC(g)}">${sMoney(g)} (${pct(gp)})</b></div>
+        ${hasFx?split(g,fxG):""}
         <div class="kv"><span>מאז אתמול</span><b class="num" style="color:${gainC(day)}">${sMoney(day)} (${pct(dp)})</b></div>
+        ${hasFx?split(day,fxD):""}
         <div class="kv"><span>סכום שהושקע</span><b class="num">${money(cst)}</b></div></div>
+      ${fxCard}
       <div class="debt" style="grid-column:span 2;min-width:0"><div class="hint">שווי התיק לאורך זמן</div>${invChart(invHist())}</div>
     </div>
     <div class="debts">${cards}</div>${form}
@@ -1895,7 +1917,7 @@ function renderInvest(){
     $("iSave").onclick=()=>{const units=num($("iUnits").value), cost=num($("iCost").value), last=num($("iLast").value);
       const name=$("iName").value.trim(); if(!name){$("iErr").textContent="תנו שם להשקעה.";return}
       if(!units||!cost){$("iErr").textContent="רשמו כמות ושער עלות.";return}
-      const P=pxNow(); const x={id:E.id||rid(),name:name.slice(0,60),num:$("iNum").value.replace(/\D/g,""),units:Math.abs(units),cost:Math.abs(cost),proxy:$("iProxy").value,hedged:$("iHedged").checked,man:E.man};
+      const P=pxNow(); const x={id:E.id||rid(),name:name.slice(0,60),num:$("iNum").value.replace(/\D/g,""),units:Math.abs(units),cost:Math.abs(cost),proxy:$("iProxy").value,hedged:$("iHedged").checked,bfx:Math.abs(num($("iBfx").value))||INV_BFX,man:E.man};
       if(last&&(!E.man||Math.abs(last-E.man.p)>1e-9)){x.man={p:Math.abs(last),d:todayISO()};if(P&&P.idx[x.proxy]&&P.fx){x.man.ix=P.idx[x.proxy].c;x.man.fx=P.fx.c}}
       else if(x.man&&E.proxy!==x.proxy){delete x.man.ix;delete x.man.fx}
       const list=h.filter(y=>y.id!==x.id); list.push(x); INV_EDIT=null; invSave(list); renderInvest(); toast("נשמר")};
