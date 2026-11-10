@@ -1,21 +1,21 @@
 {
- "updated": "2026-11-10T15:31:38.734Z",
+ "updated": "2026-11-10T22:18:09.301Z",
  "idx": {
   "SPY": {
-   "c": 749.45,
+   "c": 749.92,
    "pc": 752.6900024414062,
-   "t": "2026-11-10T15:31:36.000Z"
+   "t": "2026-11-10T21:00:00.000Z"
   },
   "QQQ": {
-   "c": 676.785,
+   "c": 674.76,
    "pc": 679.3499755859375,
-   "t": "2026-11-10T15:31:37.000Z"
+   "t": "2026-11-10T21:00:01.000Z"
   }
  },
  "fx": {
-  "c": 3.1785,
+  "c": 3.1721,
   "pc": 3.1849300861358643,
-  "t": "2026-11-10T15:31:38.000Z"
+  "t": "2026-11-10T22:00:02.000Z"
  },
  "funds": {
   "5122627": {
@@ -41,5 +41,12 @@
    "fx": 3.1531898975372314
   }
  },
- "log": []
+ "log": [
+  "TypeError: fetch failed",
+  "Error: https://query1.finance.yahoo.com/v8/finance/chart/5122627.TA?range=1mo&interval=1d -> 404",
+  "Error: https://www.funder.co.il/fund/5122627 -> 403",
+  "TypeError: fetch failed",
+  "Error: https://query1.finance.yahoo.com/v8/finance/chart/5128905.TA?range=1mo&interval=1d -> 404",
+  "Error: https://www.funder.co.il/fund/5128905 -> 403"
+ ]
 }
