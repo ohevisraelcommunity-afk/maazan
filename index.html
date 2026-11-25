@@ -2253,7 +2253,8 @@ async function raToken(){if(!RAUTH)throw new Error("signed out"); if(Date.now()<
   const r=await fetch("https://securetoken.googleapis.com/v1/token?key="+key,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"grant_type=refresh_token&refresh_token="+encodeURIComponent(RAUTH.refresh)});
   const j=await r.json(); if(!r.ok){raSave(null);location.reload();throw new Error("session expired")}
   raSave(Object.assign({},RAUTH,{idToken:j.id_token,refresh:j.refresh_token,exp:Date.now()+(+j.expires_in-120)*1000})); return RAUTH.idToken}
-function raStart(){ // signed in by password (no Firebase Auth library involved)
+async function raStart(){ // signed in by password (no Firebase Auth library involved)
+  if(!(await hmGate(RAUTH.email,()=>{raSave(null);try{firebase.auth().signOut()}catch(e){}})))return;
   $("loginGate").hidden=true; const out=$("btnSignOut"); out.hidden=false; out.title=RAUTH.email||"";
   out.onclick=()=>{raSave(null);try{firebase.auth().signOut()}catch(e){}location.reload()};
   db=restDB(window.FIREBASE_CONFIG.projectId,raToken); base="users/"+RAUTH.uid+"/data"; persistOK=true; subscribe();
@@ -2266,6 +2267,38 @@ function raWireLogin(){
       $("loginErr").textContent=/INVALID_PASSWORD|INVALID_LOGIN_CREDENTIALS|EMAIL_NOT_FOUND/.test(c)?"המייל או הסיסמה לא נכונים, או שעוד לא נקבעה סיסמה (קובעים אותה במחשב, ב\"קבצים וגיבוי\").":/PASSWORD_LOGIN_DISABLED|OPERATION_NOT_ALLOWED/.test(c)?"כניסה בסיסמה עוד לא הופעלה ב-Firebase.":/TOO_MANY/.test(c)?"יותר מדי ניסיונות. נסו שוב בעוד כמה דקות.":"הכניסה נכשלה: "+((e&&e.message)||c)}
     finally{$("btnPwLogin").disabled=false;$("btnPwLogin").textContent="כניסה"}};
 }
+/* ===== המשתלם!: מאזן הבית פתוח למנויי המשתלם. בכניסה בודקים מול המשתלם שהמייל שייך למנוי פעיל.
+   השימוש הראשון מחייב את המנוי לשנה במשתלם; מנוי שבוטל – הגישה נחסמת. אם שרת המשתלם לא זמין – לא חוסמים. */
+const HM={key:"pk_70ec24e0dafcde6b6b8049c6567e47a4",base:"https://hamishtalem.onrender.com",
+  free:["mordi0548476896@gmail.com"]}; // מיילים שתמיד מורשים (בעל האתר) – אפשר להוסיף כאן עוד, באותיות קטנות
+function hmBox(html){let b=document.getElementById("hmGate");
+  if(!html){if(b)b.remove();return}
+  if(!b){b=document.createElement("div");b.id="hmGate";b.dir="rtl";
+    b.style.cssText="position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:16px;background:rgba(13,42,51,.78);font-family:inherit";
+    document.body.appendChild(b)}
+  b.innerHTML='<div style="background:#fff;color:#0D2A33;border-radius:20px;max-width:400px;width:100%;padding:24px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.35)">'+html+'</div>';
+  return b}
+async function hmGate(email,signOut){email=String(email||"").trim().toLowerCase();
+  if(!email||HM.free.includes(email))return true;
+  try{const c=JSON.parse(localStorage.getItem("maazan.hm")||"null");if(c&&c.email===email&&c.until>Date.now())return true}catch(e){}
+  hmBox('<div style="font-size:34px">⏳</div><h2 style="margin:8px 0">בודקים את המנוי במשתלם…</h2><p style="margin:0;color:#64748b">זה יכול לקחת עד דקה בפעם הראשונה</p>');
+  let j;
+  try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),70000);
+    const r=await fetch(HM.base+"/api/partner/verify?key="+HM.key+"&email="+encodeURIComponent(email),{signal:ctl.signal});clearTimeout(t);j=await r.json()}
+  catch(e){hmBox(null);return true} // אין חיבור לשרת המשתלם – לא חוסמים
+  if(j&&j.allowed){try{localStorage.setItem("maazan.hm",JSON.stringify({email,until:Date.now()+864e5}))}catch(e){}
+    if(j.first_time)hmBox('<div style="font-size:34px">🎉</div><h2 style="margin:8px 0">ברוכים הבאים!</h2><p style="margin:0 0 16px;line-height:1.6">מאזן הבית כלול במנוי <b>המשתלם!</b> שלכם.<br>הגישה מחייבת להישאר מנויים במשתלם לפחות שנה.</p><button id="hmOk" style="border:0;border-radius:999px;padding:12px 28px;font-size:16px;font-weight:700;background:#7c3aed;color:#fff;cursor:pointer">הבנתי, כניסה</button>').querySelector("#hmOk").onclick=()=>hmBox(null);
+    else hmBox(null);
+    return true}
+  try{localStorage.removeItem("maazan.hm")}catch(e){}
+  const b=hmBox('<div style="font-size:34px">🔒</div><h2 style="margin:8px 0">מאזן הבית – למנויי המשתלם</h2><p style="margin:0 0 6px;line-height:1.6">'+String((j&&j.message)||"הגישה למנויי המשתלם בלבד").replace(/[<>&]/g,"")+'</p>'+
+    '<p style="margin:0 0 16px;color:#64748b;font-size:14px">המייל שבדקנו: <b dir="ltr">'+email.replace(/[<>&]/g,"")+'</b><br>ההרשמה למשתלם בחינם – נרשמים עם אותו מייל.</p>'+
+    '<a href="'+((j&&j.join_url)||HM.base)+'" target="_blank" rel="noopener" style="display:block;border-radius:999px;padding:12px;font-size:16px;font-weight:700;background:#7c3aed;color:#fff;text-decoration:none;margin-bottom:8px">הצטרפות למשתלם</a>'+
+    '<button id="hmRe" style="width:100%;border:1px solid #cbd5e1;border-radius:999px;padding:11px;font-size:15px;background:#fff;cursor:pointer;margin-bottom:8px">נרשמתי – לבדוק שוב</button>'+
+    '<button id="hmOut" style="width:100%;border:0;background:none;color:#64748b;cursor:pointer;font-size:14px">כניסה עם חשבון אחר</button>');
+  b.querySelector("#hmRe").onclick=()=>location.reload();
+  b.querySelector("#hmOut").onclick=()=>{try{signOut&&signOut()}catch(e){} setTimeout(()=>location.reload(),300)};
+  return false}
 function startFirebase(){
   const cfg=window.FIREBASE_CONFIG;
   firebase.initializeApp(cfg); const auth=firebase.auth(); const fs=restDB(cfg.projectId,()=>auth.currentUser.getIdToken());
@@ -2276,9 +2309,10 @@ function startFirebase(){
   window.__setPw=async(pw)=>{const u=auth.currentUser; if(!u)throw new Error("not signed in");
     if(u.providerData.some(p=>p.providerId==="password"))return u.updatePassword(pw);
     return u.linkWithCredential(firebase.auth.EmailAuthProvider.credential(u.email,pw))};
-  auth.onAuthStateChanged(u=>{
+  auth.onAuthStateChanged(async u=>{
     if(RAUTH)return; // already signed in by password
     if(!u){gate.hidden=false;out.hidden=true;persistOK=false;S.months={};S.ready=true;render();return}
+    if(!(await hmGate(u.email,()=>auth.signOut())))return; // המשתלם: רק מנוי פעיל
     gate.hidden=true;out.hidden=false;out.title=u.email||"";renderPwSet(u);
     db=fs; base="users/"+u.uid+"/data"; persistOK=true; subscribe();
   });
@@ -2300,5 +2334,6 @@ function startFirebase(){
 })();
 })();
 </script>
-
+<div data-hamishtalem-ads style="height:250px"></div>
+<script src="https://hamishtalem.onrender.com/embed.js" data-key="pk_70ec24e0dafcde6b6b8049c6567e47a4"></script>
 </body></html>
