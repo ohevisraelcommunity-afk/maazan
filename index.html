@@ -2334,6 +2334,34 @@ function startFirebase(){
 })();
 })();
 </script>
-<div data-hamishtalem-ads style="height:250px"></div>
+<!-- מודעות המשתלם: במחשב – בתפריט הצדדי (נשאר מול העיניים בגלילה), וכשאין תפריט – קופסה צפה בצד; בטלפון – פס קבוע בתחתית. אפשר להקטין -->
+<style>
+#hmAds{height:300px;border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+#hmAdsWrap{position:relative;margin-top:12px}
+#hmAdsWrap .hm-x{position:absolute;top:6px;right:6px;z-index:2;width:26px;height:26px;border-radius:50%;border:0;background:rgba(15,23,42,.65);color:#fff;font-size:15px;line-height:26px;cursor:pointer;display:none}
+#hmAdsPill{display:none}
+body.hm-ads-on #hmAdsWrap{position:fixed;left:16px;bottom:16px;width:260px;margin:0;z-index:12}
+body.hm-ads-on #hmAds{box-shadow:0 14px 34px -10px rgba(0,0,0,.4)}
+body.hm-ads-on #hmAdsWrap .hm-x{display:block}
+body.hm-ads-on.hm-ads-min #hmAdsWrap{display:none}
+body.hm-ads-on.hm-ads-min #hmAdsPill{display:block;position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:12;border:0;border-radius:999px;padding:8px 14px;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;cursor:pointer;box-shadow:0 8px 20px -6px rgba(124,58,237,.7)}
+@media (max-width:900px){
+  body.hm-ads-on #hmAdsWrap{left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));width:auto}
+  body.hm-ads-on #hmAds{height:120px}
+  body.hm-ads-on:not(.hm-ads-min) .wrap{padding-bottom:150px}
+}
+</style>
+<div id="hmAdsWrap"><button class="hm-x" type="button" aria-label="הקטנת המודעות">×</button><div id="hmAds" data-hamishtalem-ads></div></div>
+<button id="hmAdsPill" type="button">📢 מודעות</button>
+<script>(function(){
+  var w=document.getElementById("hmAdsWrap"),side=document.getElementById("side"),B=document.body,mq=matchMedia("(max-width:900px)");
+  function place(){ // במחשב, כשהתפריט הצדדי מוצג – המודעות בתוכו, מתחת לכפתורים; אחרת – צפות
+    var inSide=side&&!mq.matches&&!side.hidden&&getComputedStyle(side).display!=="none";
+    var to=inSide?side:B; if(w.parentNode!==to)to.appendChild(w); B.classList.toggle("hm-ads-on",!inSide)}
+  place(); if(side)new MutationObserver(place).observe(side,{attributes:true}); mq.addEventListener?mq.addEventListener("change",place):mq.addListener(place);
+  try{if(sessionStorage.getItem("hmAdsMin"))B.classList.add("hm-ads-min")}catch(e){}
+  w.querySelector(".hm-x").onclick=function(){B.classList.add("hm-ads-min");try{sessionStorage.setItem("hmAdsMin","1")}catch(e){}};
+  document.getElementById("hmAdsPill").onclick=function(){B.classList.remove("hm-ads-min");try{sessionStorage.removeItem("hmAdsMin")}catch(e){}};
+})();</script>
 <script src="https://hamishtalem.onrender.com/embed.js" data-key="pk_70ec24e0dafcde6b6b8049c6567e47a4"></script>
 </body></html>
